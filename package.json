@@ -1,0 +1,46 @@
+{
+  "name": "codemirror-helix",
+  "version": "0.0.2",
+  "type": "module",
+  "license": "MPL-2.0",
+  "author": "Roberto Vidal",
+  "description": "Helix bindings for CodeMirror",
+  "keywords": [
+    "code",
+    "editor",
+    "helix",
+    "codemirror"
+  ],
+  "scripts": {
+    "demo": "cd demo && vite",
+    "build": "rm -rf dist/ && ./etc/build.sh",
+    "test": "wdio run ./wdio.conf.ts"
+  },
+  "files": [
+    "dist/*"
+  ],
+  "types": "./dist/lib.d.ts",
+  "exports": {
+    "development": "./dist/lib.development.js",
+    "default": "./dist/lib.js"
+  },
+  "devDependencies": {
+    "@codemirror/lang-javascript": "^6.0.0",
+    "@wdio/cli": "^8.36.1",
+    "@wdio/local-runner": "^8.36.1",
+    "@wdio/mocha-framework": "^8.36.1",
+    "@wdio/spec-reporter": "^8.36.1",
+    "esbuild": "^0.21.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.2.2",
+    "vite": "^5.1.0",
+    "webdriverio": "^8.36.1"
+  },
+  "peerDependencies": {
+    "@codemirror/commands": "^6.0.0",
+    "@codemirror/language": "^6.0.0",
+    "@codemirror/search": "^6.0.0",
+    "@codemirror/state": "^6.0.0",
+    "@codemirror/view": "^6.0.0"
+  }
+}

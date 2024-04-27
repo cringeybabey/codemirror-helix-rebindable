@@ -1,0 +1,52 @@
+default:
+  image: node:22-slim
+  cache:
+    paths:
+      - npm_cache
+    key:
+      files: [package-lock.json]
+      prefix: v1
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+
+build-lib:
+  stage: build
+  script:
+    - rm "$NPM_TOKEN"
+    - npm ci --cache npm_cache
+    - npm run build
+  artifacts:
+    paths:
+      - dist
+
+run-tests:
+  stage: test
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "release"'
+  script:
+    - rm "$NPM_TOKEN"
+    - apt update
+    - apt install -y libgtk-3-0 libasound2 libx11-xcb-dev libnss3 libgbm-dev libdrm2
+    - npm ci --cache npm_cache
+    - npm test
+
+lint:
+  stage: test
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "release"'
+  script:
+    - rm "$NPM_TOKEN"
+    - npm ci --cache npm_cache
+    - npm exec --no prettier -- --check .
+
+publish:
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "release"'
+  script:
+    - printf '//registry.npmjs.org/:_authToken=' > ~/.npmrc
+    - cat "$NPM_TOKEN" >> ~/.npmrc
+    - rm "$NPM_TOKEN"
+    - npm publish --dry-run

@@ -1,0 +1,15 @@
+#!/bin/env sh
+
+ENV_VAR=process.env.NODE_ENV
+
+npm exec --no esbuild -- \
+  --format=esm --platform=neutral --bundle --packages=external --define:$ENV_VAR='"production"' --outfile=dist/lib.js src/lib.ts
+
+npm exec --no esbuild -- \
+  --format=esm --platform=neutral --bundle --packages=external --define:$ENV_VAR='"development"' --outfile=dist/lib.development.js src/lib.ts
+
+DECL_OUT=$(mktemp -d)
+
+npm exec --no tsc -- --noEmit false --declaration --emitDeclarationOnly --outDir $DECL_OUT
+cp $DECL_OUT/lib.d.ts dist/
+rm -r $DECL_OUT/

@@ -41,6 +41,21 @@ lint:
     - npm ci --cache npm_cache
     - npm exec --no prettier -- --check .
 
+pages:
+  stage: deploy
+  needs:
+    - run-tests
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "release"'
+  script:
+    - rm "$NPM_TOKEN"
+    - npm ci --cache npm_cache
+    - cd demo && npm exec --no vite -- build --base="./"
+  publish: demo/dist
+  artifacts:
+    paths:
+      - demo/dist
+
 publish:
   stage: deploy
   id_tokens:

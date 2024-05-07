@@ -43,10 +43,13 @@ lint:
 
 publish:
   stage: deploy
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
   rules:
     - if: '$CI_COMMIT_BRANCH == "release"'
   script:
     - printf '//registry.npmjs.org/:_authToken=' > ~/.npmrc
     - cat "$NPM_TOKEN" >> ~/.npmrc
     - rm "$NPM_TOKEN"
-    - npm publish --dry-run
+    - npm publish --provenance

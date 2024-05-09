@@ -1051,6 +1051,10 @@ function commandPanel(view: EditorView) {
 function statusPanel(view: EditorView) {
   const dom = el("div");
 
+  dom.style.display = "flex";
+  dom.style.justifyContent = "space-between";
+  dom.style.fontFamily = "monospace";
+
   const mode = el("span");
 
   mode.textContent = "NOR";
@@ -1094,10 +1098,15 @@ class CommandPanel implements Panel {
 
   constructor(private view: EditorView) {
     this.dom = el("div") as any;
+    this.dom.style.display = "flex";
+    this.dom.style.justifyContent = "space-between";
+    this.dom.style.fontFamily = "monospace";
+    this.dom.style.minHeight = "2em";
 
     this.command = el("span");
-    this.input = el("div");
-    this.input.hidden = true;
+
+    this.input = el("span");
+    this.input.style.visibility = "hidden";
 
     this.showCommand(null);
 
@@ -1116,7 +1125,7 @@ class CommandPanel implements Panel {
     const input = this.searchInput();
 
     this.input.insertBefore(input, null);
-    this.input.hidden = false;
+    this.input.style.visibility = "";
 
     input.focus();
   }
@@ -1135,8 +1144,9 @@ class CommandPanel implements Panel {
     const input = el("input") as HTMLInputElement;
 
     input.type = "text";
-    input.setAttribute("main-field", "true");
-    input.style.fontFamily = "monospace";
+    input.style.border = "none";
+    input.style.outline = "none";
+    input.style.background = "inherit";
 
     let isCompositing = false;
 
@@ -1192,7 +1202,7 @@ class CommandPanel implements Panel {
     });
 
     this.input.removeChild(this.input.lastChild!);
-    this.input.hidden = true;
+    this.input.style.visibility = "hidden";
 
     this.view.focus();
   }

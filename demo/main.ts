@@ -1,13 +1,11 @@
 import { EditorState } from "@codemirror/state";
 import { EditorView, ViewPlugin, lineNumbers } from "@codemirror/view";
-// @ts-ignore
-import source from "../src/lib.ts?raw";
 import { javascript } from "@codemirror/lang-javascript";
 import {
   defaultHighlightStyle,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { Mode, helix } from "../src/lib";
+import { helix } from "../src/lib";
 import { historyField, modeField, registerField } from "../src/state";
 import { getSearchQuery } from "@codemirror/search";
 import { MinorMode, ModeState, ModeType } from "../src/entities";
@@ -17,6 +15,13 @@ const searchElement = document.querySelector("#search")!;
 const rangeElement = document.querySelector("#range")!;
 const registerElement = document.querySelector("#register")!;
 const historyElement = document.querySelector("#history")!;
+
+const source =
+  process.env.NODE_ENV === "development"
+    ? // @ts-ignore
+      import("../src/lib.ts?raw")
+    : // @ts-ignore
+      import("./main.ts?raw");
 
 const debugPlugin = ViewPlugin.define((view) => ({
   update(_viewUpdate) {
@@ -46,7 +51,7 @@ const debugPlugin = ViewPlugin.define((view) => ({
 
 const view = new EditorView({
   state: EditorState.create({
-    doc: source,
+    doc: (await source).default,
     extensions: [
       helix(),
       debugPlugin.extension,
@@ -64,6 +69,8 @@ const view = new EditorView({
 view.focus();
 
 (window as any).view = view;
+
+document.querySelector<HTMLElement>("#debug")!.style.display = "block";
 
 function modeToString(mode: ModeState) {
   switch (mode.type) {

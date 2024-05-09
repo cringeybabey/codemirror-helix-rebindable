@@ -20,6 +20,7 @@
     "dist/*"
   ],
   "types": "./dist/lib.d.ts",
+  "main": "./dist/lib.js",
   "exports": {
     "development": "./dist/lib.development.js",
     "default": "./dist/lib.js"

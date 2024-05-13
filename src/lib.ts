@@ -11,6 +11,8 @@ import {
   cursorPageUp,
   deleteCharBackward,
   deleteCharForward,
+  indentLess,
+  indentMore,
   insertNewlineAndIndent,
   selectAll,
   selectCharLeft,
@@ -56,7 +58,7 @@ import {
   search,
   setSearchQuery,
 } from "@codemirror/search";
-import { matchBrackets } from "@codemirror/language";
+import { matchBrackets, syntaxTree } from "@codemirror/language";
 
 import { MinorMode, ModeState, ModeType } from "./entities";
 import {
@@ -70,6 +72,7 @@ import {
   searchRegisterField,
   yankEffect,
 } from "./state";
+import type { SyntaxNode } from "@lezer/common";
 
 const MODE_EFF = {
   NORMAL: modeEffect.of({
@@ -167,7 +170,8 @@ type CheckpointCommandDef<M> = {
   command: CheckpointCommand<M>;
 };
 
-type CommandDef<M> = SimpleCommand<M> | CheckpointCommandDef<M>;
+type ExplicitCommandDef<M> = SimpleCommand<M> | CheckpointCommandDef<M>;
+type CommandDef<M> = ExplicitCommandDef<M> | string;
 
 const helixCommandBindings: {
   insert: Record<string, SimpleCommand<undefined>>;
@@ -409,11 +413,11 @@ const helixCommandBindings: {
       return moveLeft(view, mode);
     },
     ["j"]: moveDown,
-    ["ArrowDown"]: moveDown,
-    ["ArrowUp"]: moveUp,
+    ["ArrowDown"]: "j",
+    ["ArrowUp"]: "k",
     ["k"]: moveUp,
-    ["ArrowRight"]: moveRight,
-    ["ArrowLeft"]: moveLeft,
+    ["ArrowRight"]: "l",
+    ["ArrowLeft"]: "h",
     ["l"](view, mode) {
       return moveRight(view, mode);
     },
@@ -633,6 +637,15 @@ const helixCommandBindings: {
     ["Alt-ArrowUp"](view) {
       return selectParentSyntax(view);
     },
+    ["Alt-o"]: "Alt-ArrowUp",
+    ["Alt-ArrowRight"](view) {
+      moveToSibling(view, true);
+    },
+    ["Alt-n"]: "Alt-ArrowRight",
+    ["Alt-ArrowLeft"](view) {
+      moveToSibling(view, false);
+    },
+    ["Alt-p"]: "Alt-ArrowLeft",
     ["Ctrl-c"]: {
       checkpoint: true,
       command(view) {
@@ -641,6 +654,18 @@ const helixCommandBindings: {
         view.original.dispatch({
           effects: MODE_EFF.NORMAL,
         });
+      },
+    },
+    [">"]: {
+      checkpoint: true,
+      command(view) {
+        return indentMore(view);
+      },
+    },
+    ["<"]: {
+      checkpoint: true,
+      command(view) {
+        return indentLess(view);
       },
     },
   },
@@ -767,6 +792,47 @@ function helixSelection(range: SelectionRange, doc: Text) {
 //     : EditorSelection.range(range.anchor - 1, range.head);
 // }
 
+function moveToSibling(view: EditorView, forward: boolean) {
+  const tree = syntaxTree(view.state);
+
+  const selection = view.state.selection.main;
+  let stack = tree.resolveStack(selection.from, 1);
+
+  let sibling: SyntaxNode | null = null;
+
+  while (true) {
+    const node = stack.node;
+
+    if (node && node.from <= selection.from && node.to >= selection.to) {
+      sibling = forward ? node?.nextSibling : node?.prevSibling;
+
+      if (sibling) {
+        break;
+      }
+    }
+
+    if (stack.next) {
+      stack = stack.next;
+    } else {
+      break;
+    }
+  }
+
+  if (!sibling) {
+    view.dispatch({
+      selection: EditorSelection.range(0, view.state.doc.length),
+      scrollIntoView: true,
+    });
+
+    return;
+  }
+
+  view.dispatch({
+    selection: EditorSelection.range(sibling.from, sibling.to),
+    scrollIntoView: true,
+  });
+}
+
 function insertLineAndEdit(view: ViewProxy, below: boolean) {
   let from: number;
   let cursor: number;
@@ -802,7 +868,7 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
     ),
   ];
 
-  function apply<M>(def: CommandDef<M>, view: EditorView, mode: M) {
+  function apply<M>(def: ExplicitCommandDef<M>, view: EditorView, mode: M) {
     if (typeof def === "function") {
       return def(view, mode);
     } else {
@@ -832,20 +898,37 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
     }
   }
 
+  function getExplicitCommand<M>(
+    key: string,
+    bindings: Record<string, CommandDef<M>>
+  ) {
+    while (true) {
+      const binding = bindings[key];
+
+      if (typeof binding === "string") {
+        key = binding;
+
+        continue;
+      }
+
+      return binding;
+    }
+  }
+
   const codemirrorKeybindings: KeyBinding[] = [];
 
   for (const key of allKeys) {
-    const insertCommand = keybindings.insert[key] as
+    const insertCommand = getExplicitCommand(key, keybindings.insert) as
       | SimpleCommand<undefined>
       | undefined;
-    const normalCommand = keybindings.normal[key] as
-      | CommandDef<NormalLikeMode>
+    const normalCommand = getExplicitCommand(key, keybindings.normal) as
+      | ExplicitCommandDef<NormalLikeMode>
       | undefined;
-    const gotoCommand = keybindings.goto[key] as
-      | CommandDef<NonInsertMode>
+    const gotoCommand = getExplicitCommand(key, keybindings.goto) as
+      | ExplicitCommandDef<NonInsertMode>
       | undefined;
-    const matchCommand = keybindings.match[key] as
-      | CommandDef<NonInsertMode>
+    const matchCommand = getExplicitCommand(key, keybindings.match) as
+      | ExplicitCommandDef<NonInsertMode>
       | undefined;
 
     const esc = key === "Escape";
@@ -950,8 +1033,13 @@ const changeFilter = EditorState.transactionFilter.from(modeField, (mode) =>
           return tr;
         }
 
+        // WARNING: coupling to internals
         if (userEvent === "input.type.compose.start") {
           return [];
+        }
+
+        if (!userEvent.startsWith("input.type")) {
+          return tr;
         }
 
         if (mode.minor !== MinorMode.Normal) {

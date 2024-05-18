@@ -12,7 +12,18 @@ npm install codemirror-helix
 
 ```typescript
 import { EditorView } from "@codemirror/view";
-import { helix } from "codemirror-helix";
+import { helix, commandFacet } from "codemirror-helix";
+
+const customCommands = commandFacet.of([
+  {
+    name: "save",
+    aliases: ["s", "sv"],
+    help: "Save the document to the cloud",
+    helper(view, args) {
+      saveDocumentToCloud(view.state.doc.toString());
+    },
+  },
+]);
 
 const view = new EditorView({
   doc: "",

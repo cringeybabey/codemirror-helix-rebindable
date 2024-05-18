@@ -10,7 +10,6 @@ import { historyField, modeField, registerField } from "../src/state";
 import { getSearchQuery } from "@codemirror/search";
 import { MinorMode, ModeState, ModeType } from "../src/entities";
 
-const modeElement = document.querySelector("#mode")!;
 const searchElement = document.querySelector("#search")!;
 const rangeElement = document.querySelector("#range")!;
 const registerElement = document.querySelector("#register")!;
@@ -25,10 +24,6 @@ const source =
 
 const debugPlugin = ViewPlugin.define((view) => ({
   update(_viewUpdate) {
-    modeElement.textContent = `${modeToString(
-      view.state.field(modeField) as any
-    )}`;
-
     registerElement.textContent = JSON.stringify(
       view.state.field(registerField)
     ).replace(/^"|"$/g, "");
@@ -90,30 +85,3 @@ view.focus();
 (window as any).view = view;
 
 document.querySelector<HTMLElement>("#debug")!.style.display = "block";
-
-function modeToString(mode: ModeState) {
-  switch (mode.type) {
-    case ModeType.Select:
-    case ModeType.Normal: {
-      const modeStr = mode.type === ModeType.Normal ? "NOR" : "SEL";
-
-      switch (mode.minor) {
-        case MinorMode.Normal: {
-          return modeStr;
-        }
-        case MinorMode.Goto: {
-          return `${modeStr} (go)`;
-        }
-        case MinorMode.Match: {
-          return `${modeStr} (match)`;
-        }
-      }
-      break;
-    }
-    case ModeType.Insert: {
-      return "INS";
-    }
-  }
-
-  throw new Error("Invalid mode");
-}

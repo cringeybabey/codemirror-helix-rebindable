@@ -5,7 +5,7 @@ import {
   defaultHighlightStyle,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { helix } from "../src/lib";
+import { commandFacet, helix } from "../src/lib";
 import { historyField, modeField, registerField } from "../src/state";
 import { getSearchQuery } from "@codemirror/search";
 import { MinorMode, ModeState, ModeType } from "../src/entities";
@@ -51,7 +51,7 @@ const debugPlugin = ViewPlugin.define((view) => ({
 
 const view = new EditorView({
   state: EditorState.create({
-    doc: (await source).default,
+    doc: localStorage.getItem("cm-hx-doc") ?? (await source).default,
     extensions: [
       helix(),
       debugPlugin.extension,
@@ -60,6 +60,25 @@ const view = new EditorView({
         typescript: true,
       }),
       lineNumbers(),
+      commandFacet.of([
+        {
+          name: "write",
+          aliases: ["w"],
+          help: "Writes the current document to local storage",
+          handler(view) {
+            const doc = view.state.doc.toString();
+            localStorage.setItem("cm-hx-doc", doc);
+          },
+        },
+        {
+          name: "reset",
+          help: "Resets the stored document",
+          handler() {
+            localStorage.removeItem("cm-hx-doc");
+            window.location.reload();
+          },
+        },
+      ]),
     ],
   }),
   extensions: [],

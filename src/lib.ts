@@ -1332,10 +1332,14 @@ function findText(
 
   const resetEffect = select ? MODE_EFF.SELECT : MODE_EFF.NORMAL;
 
+  const panel = getPanel(view, commandPanel) as CommandPanel;
+
   if (rawIndex === -1) {
     view.dispatch({
       effects: resetEffect,
     });
+
+    panel.showCommand(null);
 
     return;
   }
@@ -1348,6 +1352,8 @@ function findText(
     effects: resetEffect,
     selection: newSelection,
   });
+
+  panel.showCommand(null);
 }
 
 const PAIRS: Record<string, [string, string, boolean]> = {

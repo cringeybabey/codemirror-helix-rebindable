@@ -46,7 +46,6 @@ import {
   DecorationSet,
   EditorView,
   KeyBinding,
-  Panel,
   ViewPlugin,
   WidgetType,
   drawSelection,
@@ -54,13 +53,9 @@ import {
   keymap,
   showPanel,
 } from "@codemirror/view";
-import {
-  SearchQuery,
-  getSearchQuery,
-  search,
-  setSearchQuery,
-} from "@codemirror/search";
+import { SearchQuery, search, setSearchQuery } from "@codemirror/search";
 import { matchBrackets, syntaxTree } from "@codemirror/language";
+import type { SyntaxNode } from "@lezer/common";
 
 import { MinorMode, ModeState, ModeType } from "./entities";
 import {
@@ -75,7 +70,7 @@ import {
   searchRegisterField,
   yankEffect,
 } from "./state";
-import type { SyntaxNode } from "@lezer/common";
+import { CommandPanel, panelStyles, statusPanel } from "./panels";
 
 const MODE_EFF = {
   NORMAL: modeEffect.of({
@@ -1144,35 +1139,8 @@ export function helix(): Extension {
       ".cm-searchMatch": {
         background: "initial",
       },
-      ".cm-hx-status-panel": {
-        display: "flex",
-        "justify-content": "space-between",
-        "font-family": "monospace",
-      },
-      ".cm-hx-command-panel": {
-        display: "flex",
-        justifyContent: "space-between",
-        fontFamily: "monospace",
-        minHeight: "18px",
-      },
-      ".cm-hx-command-input": {
-        border: "none",
-        outline: "none",
-        padding: "0",
-        margin: "0",
-        background: "inherit",
-      },
-      ".cm-hx-command-popup": {
-        position: "fixed",
-        background: "#ccc",
-      },
-      ".cm-hx-command-help": {
-        border: "1px solid #777",
-        background: "#ddd",
-        padding: "2px",
-        whiteSpace: "preserve",
-      },
     }),
+    panelStyles,
     drawSelection({
       cursorBlinkRate: 0,
     }),
@@ -1253,349 +1221,7 @@ export function helix(): Extension {
 }
 
 function commandPanel(view: EditorView) {
-  return new CommandPanel(view);
-}
-
-function statusPanel(view: EditorView) {
-  const dom = el("div");
-
-  dom.classList.add("cm-hx-status-panel");
-
-  const mode = el("span");
-
-  mode.textContent = "NOR";
-  dom.insertBefore(mode, null);
-
-  const pos = el("span");
-
-  dom.insertBefore(pos, null);
-
-  function setLineCol() {
-    const { line, column } = lineCol(view);
-
-    pos.textContent = `${line}:${column}`;
-  }
-
-  setLineCol();
-
-  return {
-    dom,
-    setMode(modeStr: string) {
-      mode.textContent = modeStr;
-    },
-    setLineCol,
-  };
-}
-
-function lineCol(view: EditorView) {
-  const head = view.state.selection.main.head;
-  const lineDesc = view.state.doc.lineAt(head);
-  const line = lineDesc.number;
-  const column = head - lineDesc.from + 1;
-
-  return { line, column };
-}
-
-class CommandPanel implements Panel {
-  dom: HTMLDivElement;
-
-  private minorCommand: HTMLElement;
-  private inputContainer: HTMLElement;
-  private label: HTMLElement;
-  private message = false;
-  private commandPopup: HTMLElement;
-  private autocomplete: HTMLElement;
-  private help: HTMLElement;
-  private popupRequest?: number;
-
-  constructor(private view: EditorView) {
-    this.dom = el("div") as any;
-
-    this.minorCommand = el("span");
-    this.inputContainer = el("span");
-    this.commandPopup = el("div");
-
-    this.dom.insertBefore(this.inputContainer, null);
-    this.dom.insertBefore(this.minorCommand, null);
-    this.dom.insertBefore(this.commandPopup, null);
-
-    this.dom.classList.add("cm-hx-command-panel");
-
-    this.inputContainer.style.visibility = "hidden";
-    this.label = el("span");
-    this.inputContainer.insertBefore(this.label, null);
-
-    this.commandPopup.classList.add("cm-hx-command-popup");
-
-    this.help = el("div");
-    this.autocomplete = el("div");
-
-    this.help.hidden = true;
-    this.help.classList.add("cm-hx-command-help");
-    this.autocomplete.classList.add("cm-hx-command-autocomplete");
-
-    this.commandPopup.insertBefore(this.help, null);
-    this.commandPopup.insertBefore(this.autocomplete, null);
-
-    this.minorCommand.style.minWidth = "8em";
-    this.minorCommand.style.textAlign = "center";
-  }
-
-  showSearchInput() {
-    const input = this.searchInput();
-
-    this.showInput(input, "search:");
-  }
-
-  showCommandInput() {
-    const input = this.commandInput();
-
-    this.showInput(input, ":");
-  }
-
-  showMinor(command: string | null) {
-    if (command) {
-      this.minorCommand.textContent = command;
-    } else {
-      this.minorCommand.innerHTML = "&nbsp;";
-    }
-  }
-
-  private showInput(input: HTMLElement, label: string) {
-    this.label.textContent = label;
-    this.label.style.color = "";
-    this.inputContainer.insertBefore(input, null);
-    this.inputContainer.style.visibility = "";
-
-    input.focus();
-  }
-
-  private createInput({
-    onInput,
-    onClose,
-  }: {
-    onInput: (value: string) => void;
-    onClose: (commit: boolean, value: string) => void;
-  }) {
-    const input = el("input") as HTMLInputElement;
-
-    input.classList.add("cm-hx-command-input");
-    input.type = "text";
-
-    input.addEventListener("blur", () => onClose(false, input.value));
-
-    input.addEventListener("input", () => {
-      onInput(input.value);
-    });
-
-    input.addEventListener("keydown", (event) => {
-      if (event.isComposing) {
-        return;
-      }
-
-      const isEnter = event.key === "Enter";
-
-      if (isEnter || event.key === "Escape") {
-        onClose(isEnter, input.value);
-      }
-    });
-
-    return input;
-  }
-
-  private commandInput() {
-    const { view } = this;
-
-    // FIXME: tab completion
-    return this.createInput({
-      onClose: (commit, value) => {
-        this.hidePopup();
-
-        const [cmd, ...args] = value.split(/ +/);
-
-        if (commit && cmd) {
-          const commands = view.state.facet(commandFacet);
-
-          const command = commands.find(
-            (command) =>
-              command.name === cmd ||
-              command.aliases?.some((alias) => alias === cmd)
-          );
-
-          const result = command
-            ? command.handler(view, args)
-            : {
-                message: `no such command: '${cmd}'`,
-                error: true,
-              };
-
-          if (result) {
-            this.showMessage(result.message, result.error);
-
-            return;
-          }
-        }
-
-        this.closeInput();
-      },
-      onInput: (value) => {
-        const cmd = value.split(/ +/).at(0);
-
-        if (!cmd) {
-          this.hidePopup();
-          return;
-        }
-
-        const commands = view.state.facet(commandFacet);
-
-        const options = commands.filter(
-          (command) =>
-            command.name.startsWith(cmd) ||
-            command.aliases?.some((alias) => alias.startsWith(cmd))
-        );
-
-        if (options.length === 0) {
-          this.hidePopup();
-
-          return;
-        }
-
-        const match = options.find(
-          (command) =>
-            command.name === cmd ||
-            command.aliases?.some((alias) => alias === cmd)
-        );
-
-        this.showPopup(options, match);
-      },
-    });
-  }
-
-  showMessage(message: string, error?: boolean) {
-    this.message = true;
-    this.label.style.color = error ? "red" : "";
-    this.label.textContent = message;
-    this.closeInput(false);
-  }
-
-  hasMessage() {
-    return this.message;
-  }
-
-  clearMessage() {
-    if (this.message) {
-      this.message = false;
-      this.label.textContent = "";
-      this.inputContainer.style.visibility = "hidden";
-    }
-  }
-
-  private showPopup(commands: TypableCommand[], match?: TypableCommand) {
-    this.commandPopup.hidden = false;
-
-    this.help.hidden = !match;
-
-    if (match) {
-      this.help.textContent = `${match.help}`;
-
-      if (match.aliases && match.aliases.length > 0) {
-        this.help.textContent += `\nAliases: ${match.aliases.join(",")}`;
-      }
-    } else {
-      this.help.textContent = "";
-    }
-
-    while (commands.length > this.autocomplete.childNodes.length) {
-      const entry = el("span");
-      entry.style.marginRight = "1em";
-
-      this.autocomplete.insertBefore(entry, null);
-    }
-
-    for (const [i, child] of this.autocomplete.childNodes.entries()) {
-      const command = commands[i];
-
-      if (command) {
-        child.textContent = command.name;
-      } else {
-        break;
-      }
-    }
-
-    while (this.autocomplete.childNodes.length > commands.length) {
-      this.autocomplete.lastChild?.remove();
-    }
-
-    if (this.popupRequest == null) {
-      this.popupRequest = requestAnimationFrame(() => this.positionPopup());
-    }
-  }
-
-  private hidePopup() {
-    this.commandPopup.hidden = true;
-  }
-
-  private positionPopup() {
-    this.popupRequest = undefined;
-
-    if (this.commandPopup.hidden) {
-      return;
-    }
-
-    const box = this.inputContainer.getBoundingClientRect();
-
-    this.commandPopup.style.bottom = `${window.innerHeight - box.top}px`;
-    this.commandPopup.style.left = `${box.left}px`;
-  }
-
-  private searchInput() {
-    const { view } = this;
-
-    return this.createInput({
-      onClose: (commit) => {
-        this.closeSearchInput(commit);
-      },
-      onInput(value) {
-        const query = new SearchQuery({
-          search: value,
-          regexp: true,
-          caseSensitive: false,
-        });
-
-        const effect = setSearchQuery.of(query);
-
-        view.dispatch({ effects: effect });
-
-        addSearch(view, query);
-      },
-    });
-  }
-
-  private closeSearchInput(accept: boolean) {
-    this.view.dispatch({
-      effects: [
-        searchEffect.of({
-          type: SearchEffKind.Exit,
-          query: accept ? getSearchQuery(this.view.state) : undefined,
-        }),
-        setSearchQuery.of(new SearchQuery({ search: "" })),
-      ],
-    });
-
-    this.closeInput();
-  }
-
-  private closeInput(hide = true) {
-    this.inputContainer.removeChild(this.inputContainer.lastChild!);
-
-    if (hide) {
-      this.inputContainer.style.visibility = "hidden";
-    }
-
-    requestAnimationFrame(() => {
-      this.view.focus();
-    });
-  }
+  return new CommandPanel(view, commandFacet, addSearch);
 }
 
 function getHelixPanel(
@@ -1749,8 +1375,4 @@ function commitToHistory(view: EditorView, temp = false) {
       temp,
     }),
   };
-}
-
-function el(tag: string) {
-  return document.createElement(tag);
 }

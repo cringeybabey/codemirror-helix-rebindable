@@ -1,5 +1,7 @@
 # codemirror-helix
 
+A [Codemirror](https://codemirror.net/) plugin for [Helix](https://helix-editor.com/) keybindings and general UX.
+
 ## Installation
 
 ```

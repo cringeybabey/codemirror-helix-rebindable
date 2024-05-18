@@ -34,6 +34,7 @@ import {
   EditorSelection,
   EditorState,
   Extension,
+  Facet,
   SelectionRange,
   StateField,
   Text,
@@ -45,20 +46,16 @@ import {
   DecorationSet,
   EditorView,
   KeyBinding,
-  Panel,
+  ViewPlugin,
   WidgetType,
   drawSelection,
   getPanel,
   keymap,
   showPanel,
 } from "@codemirror/view";
-import {
-  SearchQuery,
-  getSearchQuery,
-  search,
-  setSearchQuery,
-} from "@codemirror/search";
+import { SearchQuery, search, setSearchQuery } from "@codemirror/search";
 import { matchBrackets, syntaxTree } from "@codemirror/language";
+import type { SyntaxNode } from "@lezer/common";
 
 import { MinorMode, ModeState, ModeType } from "./entities";
 import {
@@ -68,11 +65,12 @@ import {
   modeEffect,
   modeField,
   registerField,
+  sameMode,
   searchEffect,
   searchRegisterField,
   yankEffect,
 } from "./state";
-import type { SyntaxNode } from "@lezer/common";
+import { CommandPanel, panelStyles, statusPanel } from "./panels";
 
 const MODE_EFF = {
   NORMAL: modeEffect.of({
@@ -118,6 +116,7 @@ function moveRight(view: EditorView, mode: NonInsertMode) {
   mode.type === ModeType.Normal ? cursorCharRight(view) : selectCharRight(view);
 }
 
+// FIXME: refactor with "n" and "N", wrap around
 function addSearch(view: EditorView, query: SearchQuery) {
   const searchRegister = view.state.field(searchRegisterField);
   const match = query
@@ -216,8 +215,8 @@ const helixCommandBindings: {
       });
 
       if (mode.expecting) {
-        const panel = getPanel(view, commandPanel) as CommandPanel;
-        panel.showCommand(null);
+        const panel = getHelixPanel(view, commandPanel);
+        panel.showMinor(null);
       }
     },
     ["/"](view) {
@@ -228,14 +227,18 @@ const helixCommandBindings: {
         }),
       });
 
-      // openSearchPanel(view);
       view.dispatch({
         effects: setSearchQuery.of(new SearchQuery({ search: "" })),
       });
 
-      const panel = getPanel(view, commandPanel) as CommandPanel | null;
+      const panel = getHelixPanel(view, commandPanel);
 
-      panel?.showSearchInput();
+      panel.showSearchInput();
+    },
+    [":"](view) {
+      const panel = getHelixPanel(view, commandPanel);
+
+      panel.showCommandInput();
     },
     ["y"](view) {
       const selection = view.state.selection.main;
@@ -389,6 +392,7 @@ const helixCommandBindings: {
       view.dispatch({
         effects: isNormal ? MODE_EFF.NORMAL_GOTO : MODE_EFF.SELECT_GOTO,
       });
+      getHelixPanel(view, commandPanel).showMinor("g");
     },
     ["m"](view, mode) {
       const isNormal = mode.type === ModeType.Normal;
@@ -396,6 +400,7 @@ const helixCommandBindings: {
       view.dispatch({
         effects: isNormal ? MODE_EFF.NORMAL_MATCH : MODE_EFF.SELECT_MATCH,
       });
+      getHelixPanel(view, commandPanel).showMinor("m");
     },
     ["i"]: {
       checkpoint: "temp",
@@ -723,6 +728,8 @@ const helixCommandBindings: {
             },
           }),
         });
+
+        getHelixPanel(view.original, commandPanel).showMinor("ms");
       },
     },
     ["m"](view, mode) {
@@ -762,8 +769,8 @@ function setFindMode(
     },
   });
 
-  const panel = getPanel(view, commandPanel) as CommandPanel;
-  panel.showCommand(status);
+  const panel = getHelixPanel(view, commandPanel);
+  panel.showMinor(status);
 
   view.dispatch({ effects: effect });
 }
@@ -878,16 +885,7 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
         {
           original: view,
           dispatch(...args: any[]) {
-            view.dispatch(
-              {
-                effects: historyEffect.of({
-                  type: "add",
-                  state: view.state,
-                  temp,
-                }),
-              },
-              ...args
-            );
+            view.dispatch(commitToHistory(view, temp), ...args);
           },
           get state() {
             return view.state;
@@ -1074,9 +1072,7 @@ const inputHandler = EditorView.inputHandler.from(
 const updateListener = EditorView.updateListener.of((viewUpdate) => {
   const { state, startState } = viewUpdate;
 
-  const panel = getPanel(viewUpdate.view, statusPanel) as ReturnType<
-    typeof statusPanel
-  >;
+  const panel = getHelixPanel(viewUpdate.view, statusPanel);
 
   const mode = state.field(modeField);
   const startMode = startState.field(modeField);
@@ -1096,9 +1092,39 @@ const updateListener = EditorView.updateListener.of((viewUpdate) => {
 const helixKeymap = keymap.of(toCodemirrorKeymap(helixCommandBindings));
 
 /**
+ * A facet to define typable commands. No effort is made to prevent overrides,
+ * collisions, etc.
+ */
+export const commandFacet = Facet.define<TypableCommand[], TypableCommand[]>({
+  combine(commands) {
+    return commands.flat();
+  },
+});
+
+/**
+ * A command that can be typed in command mode `:`.
+ */
+export interface TypableCommand {
+  name: string;
+  aliases?: string[];
+  help: string;
+
+  /**
+   * The handler for the command. The return type can specify a message,
+   * and qualify it as an error if desired.
+   */
+  // TODO: offer a way to influence edits history
+  // TODO: offer way to make command interactive as the user types (e.g. `:g`)
+  handler(
+    view: EditorView,
+    args: any[]
+  ): { message: string; error?: boolean } | void;
+}
+
+/**
  * The main helix extension.
  *
- * It provides Helix-like keybindings, plus two panels to emulate the statusline and the command line.
+ * It provides Helix-like keybindings, plus two panels to emulate the statusline and the commandline.
  */
 export function helix(): Extension {
   return [
@@ -1114,6 +1140,7 @@ export function helix(): Extension {
         background: "initial",
       },
     }),
+    panelStyles,
     drawSelection({
       cursorBlinkRate: 0,
     }),
@@ -1129,171 +1156,84 @@ export function helix(): Extension {
     showPanel.of(statusPanel),
     showPanel.of(commandPanel),
     search(),
+    ViewPlugin.define((view) => ({
+      update(update) {
+        const mode = update.state.field(modeField);
+        const startMode = update.startState.field(modeField);
+
+        const panel = getHelixPanel(view, commandPanel);
+
+        if ((panel.hasMessage() && update.docChanged) || update.selectionSet) {
+          panel.clearMessage();
+        }
+
+        if (
+          !sameMode(mode, startMode) &&
+          mode.type !== ModeType.Insert &&
+          mode.minor === MinorMode.Normal
+        ) {
+          panel.showMinor(null);
+        }
+      },
+    })),
+    commandFacet.of([
+      {
+        name: "goto",
+        aliases: ["g"],
+        help: "Goto line number",
+        handler(view, args) {
+          if (args.length === 0) {
+            return { message: "Line number required", error: true };
+          }
+
+          const lineNo = Number(args[0]);
+
+          if (!Number.isFinite(lineNo) || lineNo <= 0) {
+            return { message: "Invalid line number", error: true };
+          }
+
+          const effectiveLine = Math.min(lineNo, view.state.doc.lines);
+
+          const line = view.state.doc.line(effectiveLine);
+
+          view.dispatch({
+            selection: EditorSelection.cursor(line.from),
+            scrollIntoView: true,
+          });
+        },
+      },
+      {
+        name: "clipboard-yank",
+        help: "Yank main selection into system clipboard",
+        handler(view) {
+          const selection = view.state.selection.main;
+          const range = helixSelection(selection, view.state.doc);
+
+          navigator.clipboard.writeText(
+            view.state.doc.slice(range.from, range.to).toString()
+          );
+
+          return { message: "Yanked main selection to + register" };
+        },
+      },
+    ]),
   ];
 }
 
 function commandPanel(view: EditorView) {
-  return new CommandPanel(view);
+  return new CommandPanel(view, commandFacet, addSearch);
 }
 
-function statusPanel(view: EditorView) {
-  const dom = el("div");
-
-  dom.style.display = "flex";
-  dom.style.justifyContent = "space-between";
-  dom.style.fontFamily = "monospace";
-
-  const mode = el("span");
-
-  mode.textContent = "NOR";
-  dom.insertBefore(mode, null);
-
-  const pos = el("span");
-
-  dom.insertBefore(pos, null);
-
-  function setLineCol() {
-    const { line, column } = lineCol(view);
-
-    pos.textContent = `${line}:${column}`;
-  }
-
-  setLineCol();
-
-  return {
-    dom,
-    setMode(modeStr: string) {
-      mode.textContent = modeStr;
-    },
-    setLineCol,
-  };
-}
-
-function lineCol(view: EditorView) {
-  const head = view.state.selection.main.head;
-  const lineDesc = view.state.doc.lineAt(head);
-  const line = lineDesc.number;
-  const column = head - lineDesc.from + 1;
-
-  return { line, column };
-}
-
-class CommandPanel implements Panel {
-  dom: HTMLDivElement;
-
-  private command: HTMLElement;
-  private input: HTMLElement;
-
-  constructor(private view: EditorView) {
-    this.dom = el("div") as any;
-    this.dom.style.display = "flex";
-    this.dom.style.justifyContent = "space-between";
-    this.dom.style.fontFamily = "monospace";
-    this.dom.style.minHeight = "2em";
-
-    this.command = el("span");
-
-    this.input = el("span");
-    this.input.style.visibility = "hidden";
-
-    this.showCommand(null);
-
-    {
-      const label = el("span");
-      label.textContent = "search:";
-
-      this.input.insertBefore(label, null);
-    }
-
-    this.dom.insertBefore(this.input, null);
-    this.dom.insertBefore(this.command, null);
-  }
-
-  showSearchInput() {
-    const input = this.searchInput();
-
-    this.input.insertBefore(input, null);
-    this.input.style.visibility = "";
-
-    input.focus();
-  }
-
-  showCommand(command: string | null) {
-    if (command) {
-      this.command.textContent = command;
-    } else {
-      this.command.innerHTML = "&nbsp;";
-    }
-  }
-
-  private searchInput() {
-    const { view } = this;
-
-    const input = el("input") as HTMLInputElement;
-
-    input.type = "text";
-    input.style.border = "none";
-    input.style.outline = "none";
-    input.style.background = "inherit";
-
-    let isCompositing = false;
-
-    input.addEventListener("compositionstart", () => {
-      isCompositing = true;
-    });
-
-    input.addEventListener("compositionend", () => {
-      isCompositing = false;
-    });
-
-    input.addEventListener("blur", () => {
-      this.closeSearchPanel(false);
-    });
-
-    input.addEventListener("input", () => {
-      const query = new SearchQuery({
-        search: input.value,
-        regexp: true,
-        caseSensitive: false,
-      });
-
-      const effect = setSearchQuery.of(query);
-
-      view.dispatch({ effects: effect });
-
-      addSearch(view, query);
-    });
-
-    input.addEventListener("keydown", (event) => {
-      if (isCompositing) {
-        return;
-      }
-      const isEnter = event.key === "Enter";
-
-      if (isEnter || event.key === "Escape") {
-        this.closeSearchPanel(isEnter);
-      }
-    });
-
-    return input;
-  }
-
-  private closeSearchPanel(accept: boolean) {
-    this.view.dispatch({
-      effects: [
-        searchEffect.of({
-          type: SearchEffKind.Exit,
-          query: accept ? getSearchQuery(this.view.state) : undefined,
-        }),
-        setSearchQuery.of(new SearchQuery({ search: "" })),
-      ],
-    });
-
-    this.input.removeChild(this.input.lastChild!);
-    this.input.style.visibility = "hidden";
-
-    this.view.focus();
-  }
+function getHelixPanel(
+  view: EditorView,
+  panel: typeof commandPanel
+): CommandPanel;
+function getHelixPanel(
+  view: EditorView,
+  panel: typeof statusPanel
+): ReturnType<typeof statusPanel>;
+function getHelixPanel(view: EditorView, panel: any) {
+  return getPanel(view, panel);
 }
 
 function toExternalMode(mode: ModeState) {
@@ -1332,10 +1272,14 @@ function findText(
 
   const resetEffect = select ? MODE_EFF.SELECT : MODE_EFF.NORMAL;
 
+  const panel = getHelixPanel(view, commandPanel);
+
   if (rawIndex === -1) {
     view.dispatch({
       effects: resetEffect,
     });
+
+    panel.showMinor(null);
 
     return;
   }
@@ -1348,6 +1292,8 @@ function findText(
     effects: resetEffect,
     selection: newSelection,
   });
+
+  panel.showMinor(null);
 }
 
 const PAIRS: Record<string, [string, string, boolean]> = {
@@ -1421,7 +1367,12 @@ function surround(view: EditorView, char: string, proxy: ViewProxy) {
     selection: EditorSelection.range(anchor, head),
   });
 }
-
-function el(tag: string) {
-  return document.createElement(tag);
+function commitToHistory(view: EditorView, temp = false) {
+  return {
+    effects: historyEffect.of({
+      type: "add",
+      state: view.state,
+      temp,
+    }),
+  };
 }

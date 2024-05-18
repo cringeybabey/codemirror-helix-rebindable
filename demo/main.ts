@@ -5,12 +5,11 @@ import {
   defaultHighlightStyle,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { helix } from "../src/lib";
+import { commandFacet, helix } from "../src/lib";
 import { historyField, modeField, registerField } from "../src/state";
 import { getSearchQuery } from "@codemirror/search";
 import { MinorMode, ModeState, ModeType } from "../src/entities";
 
-const modeElement = document.querySelector("#mode")!;
 const searchElement = document.querySelector("#search")!;
 const rangeElement = document.querySelector("#range")!;
 const registerElement = document.querySelector("#register")!;
@@ -25,10 +24,6 @@ const source =
 
 const debugPlugin = ViewPlugin.define((view) => ({
   update(_viewUpdate) {
-    modeElement.textContent = `${modeToString(
-      view.state.field(modeField) as any
-    )}`;
-
     registerElement.textContent = JSON.stringify(
       view.state.field(registerField)
     ).replace(/^"|"$/g, "");
@@ -51,7 +46,7 @@ const debugPlugin = ViewPlugin.define((view) => ({
 
 const view = new EditorView({
   state: EditorState.create({
-    doc: (await source).default,
+    doc: localStorage.getItem("cm-hx-doc") ?? (await source).default,
     extensions: [
       helix(),
       debugPlugin.extension,
@@ -60,6 +55,25 @@ const view = new EditorView({
         typescript: true,
       }),
       lineNumbers(),
+      commandFacet.of([
+        {
+          name: "write",
+          aliases: ["w"],
+          help: "Writes the current document to local storage",
+          handler(view) {
+            const doc = view.state.doc.toString();
+            localStorage.setItem("cm-hx-doc", doc);
+          },
+        },
+        {
+          name: "reset",
+          help: "Resets the stored document",
+          handler() {
+            localStorage.removeItem("cm-hx-doc");
+            window.location.reload();
+          },
+        },
+      ]),
     ],
   }),
   extensions: [],
@@ -71,30 +85,3 @@ view.focus();
 (window as any).view = view;
 
 document.querySelector<HTMLElement>("#debug")!.style.display = "block";
-
-function modeToString(mode: ModeState) {
-  switch (mode.type) {
-    case ModeType.Select:
-    case ModeType.Normal: {
-      const modeStr = mode.type === ModeType.Normal ? "NOR" : "SEL";
-
-      switch (mode.minor) {
-        case MinorMode.Normal: {
-          return modeStr;
-        }
-        case MinorMode.Goto: {
-          return `${modeStr} (go)`;
-        }
-        case MinorMode.Match: {
-          return `${modeStr} (match)`;
-        }
-      }
-      break;
-    }
-    case ModeType.Insert: {
-      return "INS";
-    }
-  }
-
-  throw new Error("Invalid mode");
-}

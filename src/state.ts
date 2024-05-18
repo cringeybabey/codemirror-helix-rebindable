@@ -25,6 +25,13 @@ export const modeField = StateField.define<ModeState>({
   },
 });
 
+export function sameMode(mode: ModeState, otherMode: ModeState) {
+  return (
+    mode.type === otherMode.type &&
+    (mode as any).minor === (otherMode as any).minor
+  );
+}
+
 export const yankEffect = StateEffect.define<string | Text>();
 
 export const registerField = StateField.define<string | Text>({

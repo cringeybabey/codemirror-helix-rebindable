@@ -655,6 +655,13 @@ const helixCommandBindings: {
         selection: EditorSelection.range(selection.head, selection.anchor),
       });
     },
+    ["Alt-:"](view) {
+      const selection = view.state.selection.main;
+
+      view.dispatch({
+        selection: EditorSelection.range(selection.from, selection.to),
+      });
+    },
     ["Alt-ArrowUp"](view) {
       return selectParentSyntax(view);
     },

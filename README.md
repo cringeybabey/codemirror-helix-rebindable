@@ -27,7 +27,7 @@ const customCommands = commandFacet.of([
 
 const view = new EditorView({
   doc: "",
-  extensions: [helix()],
+  extensions: [helix(), customCommands],
   parent: document.querySelector("#editor"),
 });
 ```

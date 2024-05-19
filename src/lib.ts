@@ -359,6 +359,22 @@ const helixCommandBindings: {
         view.dispatch(tr);
       },
     },
+    ["r"]: {
+      checkpoint: true,
+      command(view, mode) {
+        view.dispatch({
+          effects: modeEffect.of({
+            ...mode,
+            expecting: {
+              callback: replaceWithChar,
+              metadata: view,
+            },
+          }),
+        });
+
+        getHelixPanel(view.original, commandPanel).showMinor("r");
+      },
+    },
     ["w"](view, mode) {
       if (mode.type === ModeType.Normal) {
         const current = view.state.selection.main;
@@ -639,6 +655,13 @@ const helixCommandBindings: {
         selection: EditorSelection.range(selection.head, selection.anchor),
       });
     },
+    ["Alt-:"](view) {
+      const selection = view.state.selection.main;
+
+      view.dispatch({
+        selection: EditorSelection.range(selection.from, selection.to),
+      });
+    },
     ["Alt-ArrowUp"](view) {
       return selectParentSyntax(view);
     },
@@ -671,6 +694,24 @@ const helixCommandBindings: {
       checkpoint: true,
       command(view) {
         return indentLess(view);
+      },
+    },
+    ["`"]: {
+      checkpoint: true,
+      command(view) {
+        changeCase(view, false);
+      },
+    },
+    ["Alt-`"]: {
+      checkpoint: true,
+      command(view) {
+        changeCase(view, true);
+      },
+    },
+    ["~"]: {
+      checkpoint: true,
+      command(view) {
+        changeCase(view);
       },
     },
   },
@@ -1367,6 +1408,7 @@ function surround(view: EditorView, char: string, proxy: ViewProxy) {
     selection: EditorSelection.range(anchor, head),
   });
 }
+
 function commitToHistory(view: EditorView, temp = false) {
   return {
     effects: historyEffect.of({
@@ -1375,4 +1417,49 @@ function commitToHistory(view: EditorView, temp = false) {
       temp,
     }),
   };
+}
+
+function changeCase(view: ViewProxy, upper?: boolean) {
+  const selection = view.state.selection.main;
+  const selected = view.state.doc.slice(selection.from, selection.to);
+
+  let insert;
+
+  if (upper == null) {
+    insert = [...selected.toString()]
+      .map((char) => {
+        let next = char.toUpperCase();
+
+        return next === char ? char.toLowerCase() : next;
+      })
+      .join("");
+  } else if (upper) {
+    insert = selected.toString().toUpperCase();
+  } else {
+    insert = selected.toString().toLowerCase();
+  }
+
+  view.dispatch({
+    changes: {
+      from: selection.from,
+      to: selection.to,
+      insert,
+    },
+  });
+}
+
+function replaceWithChar(view: EditorView, char: string, viewProxy: ViewProxy) {
+  const selection = view.state.selection.main;
+  const selected = view.state.doc.slice(selection.from, selection.to);
+
+  viewProxy.dispatch({
+    changes: {
+      from: selection.from,
+      to: selection.to,
+      insert: selected.toString().replace(/[^\n]/g, char),
+    },
+    effects: MODE_EFF.NORMAL,
+  });
+
+  getHelixPanel(view, commandPanel).showMinor(null);
 }

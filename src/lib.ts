@@ -100,20 +100,43 @@ const MODE_EFF = {
   INSERT: modeEffect.of({ type: ModeType.Insert }),
 };
 
+function moveBy(
+  view: EditorView,
+  mode: NonInsertMode,
+  cursor: (view: EditorView) => void,
+  select: (view: EditorView) => void
+) {
+  if (mode.type === ModeType.Select) {
+    select(view);
+
+    return;
+  }
+
+  const selection = view.state.selection.main;
+
+  if (selection.from !== selection.to) {
+    view.dispatch({
+      selection: EditorSelection.cursor(selection.head),
+    });
+  }
+
+  cursor(view);
+}
+
 function moveDown(view: EditorView, mode: NonInsertMode) {
-  mode.type === ModeType.Normal ? cursorLineDown(view) : selectLineDown(view);
+  moveBy(view, mode, cursorLineDown, selectLineDown);
 }
 
 function moveUp(view: EditorView, mode: NonInsertMode) {
-  mode.type === ModeType.Normal ? cursorLineUp(view) : selectLineUp(view);
+  moveBy(view, mode, cursorLineUp, selectLineUp);
 }
 
 function moveLeft(view: EditorView, mode: NonInsertMode) {
-  mode.type === ModeType.Normal ? cursorCharLeft(view) : selectCharLeft(view);
+  moveBy(view, mode, cursorCharLeft, selectCharLeft);
 }
 
 function moveRight(view: EditorView, mode: NonInsertMode) {
-  mode.type === ModeType.Normal ? cursorCharRight(view) : selectCharRight(view);
+  moveBy(view, mode, cursorCharRight, selectCharRight);
 }
 
 // FIXME: refactor with "n" and "N", wrap around
@@ -638,20 +661,12 @@ const helixCommandBindings: {
       }
     },
     ["Ctrl-d"](view, mode) {
-      mode.type === ModeType.Normal
-        ? cursorPageDown(view)
-        : selectPageDown(view);
+      moveBy(view, mode, cursorPageDown, selectPageDown);
     },
-    ["PageDown"](view, mode) {
-      mode.type === ModeType.Normal
-        ? cursorPageDown(view)
-        : selectPageDown(view);
-    },
-    ["PageUp"](view, mode) {
-      mode.type === ModeType.Normal ? cursorPageUp(view) : selectPageUp(view);
-    },
+    ["PageDown"]: "Ctrl-d",
+    ["PageUp"]: "Ctrl-u",
     ["Ctrl-u"](view, mode) {
-      mode.type === ModeType.Normal ? cursorPageUp(view) : selectPageUp(view);
+      moveBy(view, mode, cursorPageUp, selectPageUp);
     },
     [";"](view) {
       const selection = view.state.selection.main;
@@ -665,6 +680,7 @@ const helixCommandBindings: {
 
       view.dispatch({
         selection: EditorSelection.range(selection.head, selection.anchor),
+        scrollIntoView: true,
       });
     },
     ["Alt-:"](view) {

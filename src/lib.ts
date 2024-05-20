@@ -141,15 +141,19 @@ function moveRight(view: EditorView, mode: NonInsertMode) {
 
 // FIXME: refactor with "n" and "N", wrap around
 function addSearch(view: EditorView, query: SearchQuery) {
+  let match;
   const searchRegister = view.state.field(searchRegisterField);
-  const match = query
-    .getCursor(
-      view.state,
-      (searchRegister.original ?? view.state.selection).main.to
-    )
-    .next();
 
-  if (!match.done) {
+  if (query.valid) {
+    match = query
+      .getCursor(
+        view.state,
+        (searchRegister.original ?? view.state.selection).main.to
+      )
+      .next();
+  }
+
+  if (match && !match.done) {
     view.dispatch({
       selection: EditorSelection.range(match.value.from, match.value.to),
       scrollIntoView: true,
@@ -603,6 +607,10 @@ const helixCommandBindings: {
       const active = register.active;
 
       if (!active?.valid) {
+        if (active) {
+          showSearchError(view, active);
+        }
+
         return true;
       }
 
@@ -627,6 +635,10 @@ const helixCommandBindings: {
       const active = register.active;
 
       if (!active?.valid) {
+        if (active) {
+          showSearchError(view, active);
+        }
+
         return true;
       }
 
@@ -1540,4 +1552,19 @@ function replaceWithChar(view: EditorView, char: string, viewProxy: ViewProxy) {
   });
 
   getHelixPanel(view, commandPanel).showMinor(null);
+}
+
+function showSearchError(view: EditorView, query: SearchQuery) {
+  let message = "";
+
+  try {
+    query.getCursor(view.state);
+  } catch (error: any) {
+    message = error?.message;
+  }
+
+  getHelixPanel(view, commandPanel).showMessage(
+    `Invalid regex /${query.search}/: ${message}`,
+    true
+  );
 }

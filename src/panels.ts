@@ -177,7 +177,7 @@ export class CommandPanel implements Panel {
               };
 
           if (result) {
-            this.showMessage(result.message, result.error);
+            this.showMessageAndCloseInput(result.message, result.error);
 
             return;
           }
@@ -219,9 +219,14 @@ export class CommandPanel implements Panel {
   }
 
   showMessage(message: string, error?: boolean) {
+    this.inputContainer.style.visibility = "";
     this.message = true;
     this.label.style.color = error ? "red" : "";
     this.label.textContent = message;
+  }
+
+  private showMessageAndCloseInput(message: string, error?: boolean) {
+    this.showMessage(message, error);
     this.closeInput(false);
   }
 

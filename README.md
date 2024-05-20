@@ -19,7 +19,7 @@ const customCommands = commandFacet.of([
     name: "save",
     aliases: ["s", "sv"],
     help: "Save the document to the cloud",
-    helper(view, args) {
+    handler(view, args) {
       saveDocumentToCloud(view.state.doc.toString());
     },
   },

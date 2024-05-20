@@ -272,6 +272,18 @@ const helixCommandBindings: {
         });
       },
     },
+    ["I"]: {
+      checkpoint: "temp",
+      command(view) {
+        const selection = view.state.selection.main;
+        const start = view.state.doc.lineAt(selection.from).from;
+
+        view.dispatch({
+          effects: MODE_EFF.INSERT,
+          selection: EditorSelection.cursor(start),
+        });
+      },
+    },
     ["c"]: {
       checkpoint: "temp",
       command(view) {
@@ -713,6 +725,56 @@ const helixCommandBindings: {
       command(view) {
         changeCase(view);
       },
+    },
+    ["*"](view) {
+      const selection = helixSelection(
+        view.state.selection.main,
+        view.state.doc
+      );
+      const selected = view.state.doc
+        .slice(selection.from, selection.to)
+        .toString();
+
+      view.dispatch({
+        effects: searchEffect.of({
+          type: SearchEffKind.Exit,
+          query: new SearchQuery({
+            search: selected,
+            caseSensitive: /[A-Z]/.test(selected),
+            regexp: false,
+          }),
+        }),
+      });
+    },
+    ["_"](view) {
+      const selection = helixSelection(
+        view.state.selection.main,
+        view.state.doc
+      );
+      const selected = view.state.doc
+        .slice(selection.from, selection.to)
+        .toString();
+      const trimmed = selected.trim();
+
+      if (trimmed === selected) {
+        return;
+      }
+
+      const startOffset = selected.indexOf(trimmed);
+      const endOffset = selected.length - trimmed.length - startOffset;
+
+      const anchor =
+        selection.anchor === selection.from
+          ? selection.anchor + startOffset
+          : selection.anchor - endOffset;
+      const head =
+        selection.head === selection.to
+          ? selection.head - endOffset
+          : selection.head + startOffset;
+
+      view.dispatch({
+        selection: EditorSelection.range(anchor, head),
+      });
     },
   },
   goto: {

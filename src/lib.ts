@@ -100,33 +100,60 @@ const MODE_EFF = {
   INSERT: modeEffect.of({ type: ModeType.Insert }),
 };
 
+function moveBy(
+  view: EditorView,
+  mode: NonInsertMode,
+  cursor: (view: EditorView) => void,
+  select: (view: EditorView) => void
+) {
+  if (mode.type === ModeType.Select) {
+    select(view);
+
+    return;
+  }
+
+  const selection = view.state.selection.main;
+
+  if (selection.from !== selection.to) {
+    view.dispatch({
+      selection: EditorSelection.cursor(selection.head),
+    });
+  }
+
+  cursor(view);
+}
+
 function moveDown(view: EditorView, mode: NonInsertMode) {
-  mode.type === ModeType.Normal ? cursorLineDown(view) : selectLineDown(view);
+  moveBy(view, mode, cursorLineDown, selectLineDown);
 }
 
 function moveUp(view: EditorView, mode: NonInsertMode) {
-  mode.type === ModeType.Normal ? cursorLineUp(view) : selectLineUp(view);
+  moveBy(view, mode, cursorLineUp, selectLineUp);
 }
 
 function moveLeft(view: EditorView, mode: NonInsertMode) {
-  mode.type === ModeType.Normal ? cursorCharLeft(view) : selectCharLeft(view);
+  moveBy(view, mode, cursorCharLeft, selectCharLeft);
 }
 
 function moveRight(view: EditorView, mode: NonInsertMode) {
-  mode.type === ModeType.Normal ? cursorCharRight(view) : selectCharRight(view);
+  moveBy(view, mode, cursorCharRight, selectCharRight);
 }
 
 // FIXME: refactor with "n" and "N", wrap around
 function addSearch(view: EditorView, query: SearchQuery) {
+  let match;
   const searchRegister = view.state.field(searchRegisterField);
-  const match = query
-    .getCursor(
-      view.state,
-      (searchRegister.original ?? view.state.selection).main.to
-    )
-    .next();
 
-  if (!match.done) {
+  if (query.valid) {
+    match = query
+      .getCursor(
+        view.state,
+        (searchRegister.original ?? view.state.selection).main.to
+      )
+      .next();
+  }
+
+  if (match && !match.done) {
     view.dispatch({
       selection: EditorSelection.range(match.value.from, match.value.to),
       scrollIntoView: true,
@@ -269,6 +296,18 @@ const helixCommandBindings: {
         view.dispatch({
           effects: MODE_EFF.INSERT,
           selection: EditorSelection.cursor(end),
+        });
+      },
+    },
+    ["I"]: {
+      checkpoint: "temp",
+      command(view) {
+        const selection = view.state.selection.main;
+        const start = view.state.doc.lineAt(selection.from).from;
+
+        view.dispatch({
+          effects: MODE_EFF.INSERT,
+          selection: EditorSelection.cursor(start),
         });
       },
     },
@@ -568,6 +607,10 @@ const helixCommandBindings: {
       const active = register.active;
 
       if (!active?.valid) {
+        if (active) {
+          showSearchError(view, active);
+        }
+
         return true;
       }
 
@@ -592,6 +635,10 @@ const helixCommandBindings: {
       const active = register.active;
 
       if (!active?.valid) {
+        if (active) {
+          showSearchError(view, active);
+        }
+
         return true;
       }
 
@@ -626,20 +673,12 @@ const helixCommandBindings: {
       }
     },
     ["Ctrl-d"](view, mode) {
-      mode.type === ModeType.Normal
-        ? cursorPageDown(view)
-        : selectPageDown(view);
+      moveBy(view, mode, cursorPageDown, selectPageDown);
     },
-    ["PageDown"](view, mode) {
-      mode.type === ModeType.Normal
-        ? cursorPageDown(view)
-        : selectPageDown(view);
-    },
-    ["PageUp"](view, mode) {
-      mode.type === ModeType.Normal ? cursorPageUp(view) : selectPageUp(view);
-    },
+    ["PageDown"]: "Ctrl-d",
+    ["PageUp"]: "Ctrl-u",
     ["Ctrl-u"](view, mode) {
-      mode.type === ModeType.Normal ? cursorPageUp(view) : selectPageUp(view);
+      moveBy(view, mode, cursorPageUp, selectPageUp);
     },
     [";"](view) {
       const selection = view.state.selection.main;
@@ -653,6 +692,7 @@ const helixCommandBindings: {
 
       view.dispatch({
         selection: EditorSelection.range(selection.head, selection.anchor),
+        scrollIntoView: true,
       });
     },
     ["Alt-:"](view) {
@@ -713,6 +753,56 @@ const helixCommandBindings: {
       command(view) {
         changeCase(view);
       },
+    },
+    ["*"](view) {
+      const selection = helixSelection(
+        view.state.selection.main,
+        view.state.doc
+      );
+      const selected = view.state.doc
+        .slice(selection.from, selection.to)
+        .toString();
+
+      view.dispatch({
+        effects: searchEffect.of({
+          type: SearchEffKind.Exit,
+          query: new SearchQuery({
+            search: selected,
+            caseSensitive: /[A-Z]/.test(selected),
+            regexp: false,
+          }),
+        }),
+      });
+    },
+    ["_"](view) {
+      const selection = helixSelection(
+        view.state.selection.main,
+        view.state.doc
+      );
+      const selected = view.state.doc
+        .slice(selection.from, selection.to)
+        .toString();
+      const trimmed = selected.trim();
+
+      if (trimmed === selected) {
+        return;
+      }
+
+      const startOffset = selected.indexOf(trimmed);
+      const endOffset = selected.length - trimmed.length - startOffset;
+
+      const anchor =
+        selection.anchor === selection.from
+          ? selection.anchor + startOffset
+          : selection.anchor - endOffset;
+      const head =
+        selection.head === selection.to
+          ? selection.head - endOffset
+          : selection.head + startOffset;
+
+      view.dispatch({
+        selection: EditorSelection.range(anchor, head),
+      });
     },
   },
   goto: {
@@ -1462,4 +1552,19 @@ function replaceWithChar(view: EditorView, char: string, viewProxy: ViewProxy) {
   });
 
   getHelixPanel(view, commandPanel).showMinor(null);
+}
+
+function showSearchError(view: EditorView, query: SearchQuery) {
+  let message = "";
+
+  try {
+    query.getCursor(view.state);
+  } catch (error: any) {
+    message = error?.message;
+  }
+
+  getHelixPanel(view, commandPanel).showMessage(
+    `Invalid regex /${query.search}/: ${message}`,
+    true
+  );
 }

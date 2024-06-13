@@ -85,6 +85,10 @@ const MODE_EFF = {
     type: ModeType.Normal,
     minor: MinorMode.Match,
   }),
+  NORMAL_SPACE: modeEffect.of({
+    type: ModeType.Normal,
+    minor: MinorMode.Space,
+  }),
   SELECT: modeEffect.of({
     type: ModeType.Select,
     minor: MinorMode.Normal,
@@ -96,6 +100,10 @@ const MODE_EFF = {
   SELECT_MATCH: modeEffect.of({
     type: ModeType.Select,
     minor: MinorMode.Match,
+  }),
+  SELECT_SPACE: modeEffect.of({
+    type: ModeType.Select,
+    minor: MinorMode.Space,
   }),
   INSERT: modeEffect.of({ type: ModeType.Insert }),
 };
@@ -204,6 +212,7 @@ const helixCommandBindings: {
   normal: Record<string, CommandDef<NormalLikeMode>>;
   goto: Record<string, CommandDef<NonInsertMode>>;
   match: Record<string, CommandDef<NonInsertMode>>;
+  space: Record<string, CommandDef<NonInsertMode>>;
 } = {
   insert: {
     Backspace(view) {
@@ -274,6 +283,10 @@ const helixCommandBindings: {
       view.dispatch({
         effects: yankEffect.of(view.state.doc.slice(range.from, range.to)),
       });
+
+      getHelixPanel(view, commandPanel).showMessage(
+        'yanked 1 selection to register "'
+      );
     },
     ["a"]: {
       checkpoint: "temp",
@@ -352,41 +365,17 @@ const helixCommandBindings: {
     ["P"]: {
       checkpoint: true,
       command(view) {
-        const range = view.state.selection.main;
         const yanked = view.state.field(registerField);
 
-        const spec = { from: range.from, insert: yanked };
-
-        const change = view.state.changes(spec);
-
-        view.dispatch(
-          { changes: change },
-          {
-            selection: { anchor: range.from, head: range.from + yanked.length },
-            sequential: true,
-          },
-          { effects: MODE_EFF.NORMAL }
-        );
+        paste(view, yanked, false);
       },
     },
     ["p"]: {
       checkpoint: true,
       command(view) {
-        const range = view.state.selection.main;
         const yanked = view.state.field(registerField);
 
-        const spec = { from: range.to, insert: yanked };
-
-        const change = view.state.changes(spec);
-
-        view.dispatch(
-          { changes: change },
-          {
-            selection: { anchor: range.to, head: range.to + yanked.length },
-            sequential: true,
-          },
-          { effects: MODE_EFF.NORMAL }
-        );
+        paste(view, yanked, true);
       },
     },
     ["R"]: {
@@ -448,6 +437,15 @@ const helixCommandBindings: {
         effects: isNormal ? MODE_EFF.NORMAL_GOTO : MODE_EFF.SELECT_GOTO,
       });
       getHelixPanel(view, commandPanel).showMinor("g");
+    },
+    ["Space"](view, mode) {
+      const isNormal = mode.type === ModeType.Normal;
+
+      view.dispatch({
+        effects: isNormal ? MODE_EFF.NORMAL_SPACE : MODE_EFF.SELECT_SPACE,
+      });
+
+      getHelixPanel(view, commandPanel).showMinor("<space>");
     },
     ["m"](view, mode) {
       const isNormal = mode.type === ModeType.Normal;
@@ -899,7 +897,79 @@ const helixCommandBindings: {
       });
     },
   },
+  space: {
+    ["y"](view) {
+      const selection = view.state.selection.main;
+      const range = helixSelection(selection, view.state.doc);
+
+      navigator.clipboard.writeText(
+        view.state.doc.slice(range.from, range.to).toString()
+      );
+
+      getHelixPanel(view, commandPanel).showMessage(
+        "yanked 1 selection to register +"
+      );
+
+      view.dispatch({
+        effects: MODE_EFF.NORMAL,
+      });
+    },
+    ["p"]: {
+      checkpoint: true,
+      command(view) {
+        view.dispatch({ effects: MODE_EFF.NORMAL });
+
+        navigator.clipboard
+          .readText()
+          .then((yanked) => paste(view, yanked, true, false));
+      },
+    },
+    ["P"]: {
+      checkpoint: true,
+      command(view) {
+        view.dispatch({ effects: MODE_EFF.NORMAL });
+
+        navigator.clipboard
+          .readText()
+          .then((yanked) => paste(view, yanked, false, false));
+      },
+    },
+    ["R"]: {
+      checkpoint: true,
+      command(view) {
+        view.dispatch({ effects: MODE_EFF.NORMAL });
+        navigator.clipboard.readText().then((yanked) => {
+          const tr = view.state.replaceSelection(yanked);
+          view.dispatch(tr);
+        });
+      },
+    },
+  },
 };
+
+function paste(
+  view: ViewProxy,
+  yanked: string | Text,
+  before: boolean,
+  reset = true
+) {
+  const range = view.state.selection.main;
+
+  const spec = { from: range.to, insert: yanked };
+
+  const change = view.state.changes(spec);
+
+  view.dispatch(
+    { changes: change },
+    {
+      selection: before
+        ? { anchor: range.to, head: range.to + yanked.length }
+        : { anchor: range.from, head: range.from + yanked.length },
+      sequential: true,
+    },
+    reset ? { effects: MODE_EFF.NORMAL } : {}
+  );
+}
 
 function setFindMode(
   view: EditorView,
@@ -1075,6 +1145,9 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
     const matchCommand = getExplicitCommand(key, keybindings.match) as
       | ExplicitCommandDef<NonInsertMode>
       | undefined;
+    const spaceCommand = getExplicitCommand(key, keybindings.space) as
+      | ExplicitCommandDef<NonInsertMode>
+      | undefined;
 
     const esc = key === "Escape";
     const isChar = key.length === 1;
@@ -1102,6 +1175,8 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
         result = apply(gotoCommand, view, mode);
       } else if (mode.minor === MinorMode.Match && matchCommand) {
         result = apply(matchCommand, view, mode);
+      } else if (mode.minor === MinorMode.Space && spaceCommand) {
+        result = apply(spaceCommand, view, mode);
       } else {
         return false;
       }

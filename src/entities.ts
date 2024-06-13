@@ -10,6 +10,7 @@ export const enum MinorMode {
   Normal = 2,
   Goto = 3,
   Match = 5,
+  Space = 6,
 }
 
 export type ModeState =

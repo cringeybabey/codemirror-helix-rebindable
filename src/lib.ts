@@ -833,8 +833,24 @@ const helixCommandBindings: {
         effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
       });
     },
-    j: moveDown,
-    k: moveUp,
+    ["j"](view, mode) {
+      const isNormal = mode.type === ModeType.Normal;
+
+      moveDown(view, mode);
+
+      view.dispatch({
+        effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
+      });
+    },
+    ["k"](view, mode) {
+      const isNormal = mode.type === ModeType.Normal;
+
+      moveUp(view, mode);
+
+      view.dispatch({
+        effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
+      });
+    },
     ["l"](view, mode) {
       const isNormal = mode.type === ModeType.Normal;
 
@@ -1393,13 +1409,13 @@ function findText(
   const select = mode.type === ModeType.Select;
   const selection = view.state.selection.main;
 
-  const start = reverse ? selection.from : selection.to;
+  const start = selection.head;
 
   const doc = view.state.doc.toString();
 
   const rawIndex = reverse
-    ? doc.lastIndexOf(text, start)
-    : doc.indexOf(text, start);
+    ? doc.lastIndexOf(text, start - 1)
+    : doc.indexOf(text, start + 1);
 
   const resetEffect = select ? MODE_EFF.SELECT : MODE_EFF.NORMAL;
 
@@ -1417,7 +1433,9 @@ function findText(
 
   const index = inclusive ? rawIndex : reverse ? rawIndex + 1 : rawIndex - 1;
 
-  const newSelection = EditorSelection.range(selection.head, index);
+  const newSelection = select
+    ? EditorSelection.range(selection.anchor, index)
+    : EditorSelection.range(selection.head, index);
 
   view.dispatch({
     effects: resetEffect,

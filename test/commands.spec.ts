@@ -27,6 +27,25 @@ const cases: Array<[string, string | string[], string[], Assertion]> = [
     "<foo>",
   ],
   ["cancels surrounds", "foo", ["x", "m", "s", "Escape", "a", "i"], "fooi"],
+  ["find characters", "hello world", ["f", "w"], { selection: [0, 6] }],
+  [
+    "find characters, repeat",
+    "hello world",
+    ["f", "o", "f", "o"],
+    { selection: [4, 7] },
+  ],
+  [
+    "find characters, turn around",
+    "hello world",
+    ["f", "w", "F", "e"],
+    { selection: [6, 1] },
+  ],
+  [
+    "find characters, select & repeat",
+    "hello world hello world",
+    ["v", "f", "o", "f", "o", "f", "e", "F", "d"],
+    { selection: [0, 10] },
+  ],
 ];
 
 describe("codemirror-helix", () => {

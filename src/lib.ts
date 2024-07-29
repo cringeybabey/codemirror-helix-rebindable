@@ -1344,17 +1344,25 @@ export interface TypableCommand {
 }
 
 /**
+ * Options to configure the extension.
+ * The names follow Helix's options' naming.
+ */
+export interface ExtensionOptions {
+  "editor.cursor-shape.insert"?: "block" | "bar";
+}
+
+/**
  * The main helix extension.
  *
  * It provides Helix-like keybindings, plus two panels to emulate the statusline and the commandline.
  */
-export function helix(): Extension {
+export function helix(options: ExtensionOptions = {}): Extension {
   return [
     EditorView.theme({
-      ".cm-cursor": {
+      ".cm-hx-block-cursor .cm-cursor": {
         display: "none !important",
       },
-      ".cm-hx-cursor": {
+      ".cm-hx-block-cursor .cm-hx-cursor": {
         background: "#ccc",
       },
       // WARNING: flaky
@@ -1378,26 +1386,45 @@ export function helix(): Extension {
     showPanel.of(statusPanel),
     showPanel.of(commandPanel),
     search(),
-    ViewPlugin.define((view) => ({
-      update(update) {
-        const mode = update.state.field(modeField);
-        const startMode = update.startState.field(modeField);
+    ViewPlugin.define((view) => {
+      const cursorShape = options["editor.cursor-shape.insert"];
 
-        const panel = getHelixPanel(view, commandPanel);
+      view.scrollDOM.classList.add("cm-hx-block-cursor");
 
-        if ((panel.hasMessage() && update.docChanged) || update.selectionSet) {
-          panel.clearMessage();
-        }
+      return {
+        update(update) {
+          const mode = update.state.field(modeField);
+          const startMode = update.startState.field(modeField);
 
-        if (
-          !sameMode(mode, startMode) &&
-          mode.type !== ModeType.Insert &&
-          mode.minor === MinorMode.Normal
-        ) {
-          panel.showMinor(null);
-        }
-      },
-    })),
+          const panel = getHelixPanel(view, commandPanel);
+
+          if (
+            (panel.hasMessage() && update.docChanged) ||
+            update.selectionSet
+          ) {
+            panel.clearMessage();
+          }
+
+          const modeChanged = !sameMode(mode, startMode);
+
+          if (
+            modeChanged &&
+            mode.type !== ModeType.Insert &&
+            mode.minor === MinorMode.Normal
+          ) {
+            panel.showMinor(null);
+          }
+
+          if (modeChanged && cursorShape === "bar") {
+            if (mode.type === ModeType.Insert) {
+              view.scrollDOM.classList.remove("cm-hx-block-cursor");
+            } else {
+              view.scrollDOM.classList.add("cm-hx-block-cursor");
+            }
+          }
+        },
+      };
+    }),
     commandFacet.of([
       {
         name: "goto",

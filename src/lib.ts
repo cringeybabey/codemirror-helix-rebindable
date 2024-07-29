@@ -1344,17 +1344,25 @@ export interface TypableCommand {
 }
 
 /**
+ * Options to configure the extension.
+ * The names follow Helix's options' naming.
+ */
+export interface ExtensionOptions {
+  'editor.cursor-shape.insert': 'block' | 'bar';
+}
+
+/**
  * The main helix extension.
  *
  * It provides Helix-like keybindings, plus two panels to emulate the statusline and the commandline.
  */
-export function helix(): Extension {
+export function helix(options?: ExtensionOptions): Extension {
   return [
     EditorView.theme({
-      ".cm-cursor": {
+      ".cm-hx-block-cursor .cm-cursor": {
         display: "none !important",
       },
-      ".cm-hx-cursor": {
+      ".cm-hx-block-cursor .cm-hx-cursor": {
         background: "#ccc",
       },
       // WARNING: flaky
@@ -1395,6 +1403,17 @@ export function helix(): Extension {
           mode.minor === MinorMode.Normal
         ) {
           panel.showMinor(null);
+        }
+
+        // Changes cursor shape depending on the current mode (this could be moved to a function)
+        if (options?.['editor.cursor-shape.insert'] == 'bar') {
+          if (mode.type !== ModeType.Insert) {
+            view.scrollDOM.classList.add("cm-hx-block-cursor");
+          } else {
+            view.scrollDOM.classList.remove("cm-hx-block-cursor");
+          }
+        } else {
+            view.scrollDOM.classList.add("cm-hx-block-cursor");
         }
       },
     })),

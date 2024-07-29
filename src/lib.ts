@@ -1348,7 +1348,7 @@ export interface TypableCommand {
  * The names follow Helix's options' naming.
  */
 export interface ExtensionOptions {
-  'editor.cursor-shape.insert': 'block' | 'bar';
+  "editor.cursor-shape.insert"?: "block" | "bar";
 }
 
 /**
@@ -1356,7 +1356,7 @@ export interface ExtensionOptions {
  *
  * It provides Helix-like keybindings, plus two panels to emulate the statusline and the commandline.
  */
-export function helix(options?: ExtensionOptions): Extension {
+export function helix(options: ExtensionOptions = {}): Extension {
   return [
     EditorView.theme({
       ".cm-hx-block-cursor .cm-cursor": {
@@ -1386,37 +1386,45 @@ export function helix(options?: ExtensionOptions): Extension {
     showPanel.of(statusPanel),
     showPanel.of(commandPanel),
     search(),
-    ViewPlugin.define((view) => ({
-      update(update) {
-        const mode = update.state.field(modeField);
-        const startMode = update.startState.field(modeField);
+    ViewPlugin.define((view) => {
+      const cursorShape = options["editor.cursor-shape.insert"];
 
-        const panel = getHelixPanel(view, commandPanel);
+      view.scrollDOM.classList.add("cm-hx-block-cursor");
 
-        if ((panel.hasMessage() && update.docChanged) || update.selectionSet) {
-          panel.clearMessage();
-        }
+      return {
+        update(update) {
+          const mode = update.state.field(modeField);
+          const startMode = update.startState.field(modeField);
 
-        if (
-          !sameMode(mode, startMode) &&
-          mode.type !== ModeType.Insert &&
-          mode.minor === MinorMode.Normal
-        ) {
-          panel.showMinor(null);
-        }
+          const panel = getHelixPanel(view, commandPanel);
 
-        // Changes cursor shape depending on the current mode (this could be moved to a function)
-        if (options?.['editor.cursor-shape.insert'] == 'bar') {
-          if (mode.type !== ModeType.Insert) {
-            view.scrollDOM.classList.add("cm-hx-block-cursor");
-          } else {
-            view.scrollDOM.classList.remove("cm-hx-block-cursor");
+          if (
+            (panel.hasMessage() && update.docChanged) ||
+            update.selectionSet
+          ) {
+            panel.clearMessage();
           }
-        } else {
-            view.scrollDOM.classList.add("cm-hx-block-cursor");
-        }
-      },
-    })),
+
+          const modeChanged = !sameMode(mode, startMode);
+
+          if (
+            modeChanged &&
+            mode.type !== ModeType.Insert &&
+            mode.minor === MinorMode.Normal
+          ) {
+            panel.showMinor(null);
+          }
+
+          if (modeChanged && cursorShape === "bar") {
+            if (mode.type === ModeType.Insert) {
+              view.scrollDOM.classList.remove("cm-hx-block-cursor");
+            } else {
+              view.scrollDOM.classList.add("cm-hx-block-cursor");
+            }
+          }
+        },
+      };
+    }),
     commandFacet.of([
       {
         name: "goto",

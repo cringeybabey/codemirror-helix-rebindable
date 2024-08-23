@@ -1,11 +1,4 @@
-import {
-  EditorSelection,
-  EditorState,
-  StateEffect,
-  StateField,
-  Text,
-} from "@codemirror/state";
-import { SearchQuery } from "@codemirror/search";
+import { EditorState, StateEffect, StateField, Text } from "@codemirror/state";
 import { MinorMode, ModeState, ModeType } from "./entities";
 
 export const modeEffect = StateEffect.define<ModeState>();
@@ -78,81 +71,32 @@ function minorModeStr(minor: MinorMode) {
   }
 }
 
-export const yankEffect = StateEffect.define<string | Text>();
+export const yankEffect = StateEffect.define<[string, string | Text]>();
 
-export const registerField = StateField.define<string | Text>({
+export const registersField = StateField.define<
+  Record<string, string | Text | undefined>
+>({
   create() {
-    return "";
+    return {};
   },
-  update(register, tr) {
+  update(registers, tr) {
     for (const effect of tr.effects) {
       if (effect.is(yankEffect)) {
-        register = effect.value;
-      }
-    }
+        const [reg, value] = effect.value;
 
-    return register;
-  },
-});
+        if (value.length === 0) {
+          const { [reg]: _reg, ...rest } = registers;
 
-export type SearchRegister = {
-  active: SearchQuery | null;
-  original?: {
-    selection: EditorSelection;
-    scroll: StateEffect<any>;
-  };
-};
-
-export const searchRegisterField = StateField.define<SearchRegister>({
-  create() {
-    return { active: null };
-  },
-
-  update(search, tr) {
-    for (const effect of tr.effects) {
-      if (effect.is(searchEffect)) {
-        const effectValue = effect.value;
-
-        switch (effectValue.type) {
-          case SearchEffKind.Start: {
-            search = { ...search, original: effectValue.snapshot };
-
-            break;
-          }
-          case SearchEffKind.Exit: {
-            search = {
-              original: undefined,
-              active: effectValue.query ?? search.active,
-            };
-
-            break;
-          }
+          registers = rest;
+        } else {
+          registers = { ...registers, [reg]: value };
         }
       }
     }
 
-    return search;
+    return registers;
   },
 });
-
-export const enum SearchEffKind {
-  Start,
-  Exit,
-}
-
-export const searchEffect = StateEffect.define<
-  | {
-      type: SearchEffKind.Start;
-      snapshot: {
-        selection: EditorSelection;
-        scroll: StateEffect<any>;
-      };
-    }
-  | {
-      type: SearchEffKind.Exit;
-      query?: SearchQuery;
-    }
->();
 
 type HistoryEffect =
   | {

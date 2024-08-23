@@ -6,9 +6,8 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { commandFacet, helix } from "../src/lib";
-import { historyField, modeField, registerField } from "../src/state";
+import { historyField, modeField, registersField } from "../src/state";
 import { getSearchQuery } from "@codemirror/search";
-import { MinorMode, ModeState, ModeType } from "../src/entities";
 
 const searchElement = document.querySelector("#search")!;
 const rangeElement = document.querySelector("#range")!;
@@ -24,9 +23,11 @@ const source =
 
 const debugPlugin = ViewPlugin.define((view) => ({
   update(_viewUpdate) {
-    registerElement.textContent = JSON.stringify(
-      view.state.field(registerField)
-    ).replace(/^"|"$/g, "");
+    registerElement.textContent = Object.entries(
+      view.state.field(registersField)
+    )
+      .map(([reg, value]) => `${reg} ${value}`)
+      .join("\n");
 
     const selection = view.state.selection.main;
     rangeElement.textContent = `${selection.from} ${

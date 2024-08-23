@@ -36,6 +36,7 @@ import {
   Extension,
   Facet,
   SelectionRange,
+  StateEffect,
   StateField,
   Text,
   Transaction,
@@ -53,22 +54,19 @@ import {
   keymap,
   showPanel,
 } from "@codemirror/view";
-import { SearchQuery, search, setSearchQuery } from "@codemirror/search";
+import { SearchQuery } from "@codemirror/search";
 import { matchBrackets, syntaxTree } from "@codemirror/language";
 import type { SyntaxNode } from "@lezer/common";
 
 import { MinorMode, ModeState, ModeType } from "./entities";
 import {
-  SearchEffKind,
   historyEffect,
   historyField,
   modeEffect,
   modeField,
-  registerField,
+  registersField,
   sameMode,
   sameModeState,
-  searchEffect,
-  searchRegisterField,
   yankEffect,
 } from "./state";
 import { CommandPanel, panelStyles, statusPanel } from "./panels";
@@ -158,38 +156,88 @@ function moveRight(view: EditorView, mode: NonInsertMode) {
   moveBy(view, mode, cursorCharRight, selectCharRight);
 }
 
-// FIXME: refactor with "n" and "N", wrap around
-function addSearch(view: EditorView, query: SearchQuery) {
-  let match;
-  const searchRegister = view.state.field(searchRegisterField);
+function startSearch(view: EditorView) {
+  const initialScroll = view.scrollSnapshot();
+  const initialSelection = view.state.selection;
 
-  if (query.valid) {
-    match = query
-      .getCursor(
-        view.state,
-        (searchRegister.original?.selection ?? view.state.selection).main.to
-      )
-      .next();
+  let input = "";
+  let query: SearchQuery | null = null;
+
+  function reset() {
+    view.dispatch({
+      selection: initialSelection,
+    });
+
+    resetScroll(view, initialScroll);
   }
 
-  if (match && !match.done) {
-    const selection = EditorSelection.range(match.value.from, match.value.to);
+  return {
+    onInput(input_: string) {
+      if (input !== input_) {
+        input = input_;
+        query = searchQuery(input);
+      } else {
+        console.log(`SEARCH no changes`);
+        return;
+      }
 
-    view.dispatch({
-      selection,
-      effects: EditorView.scrollIntoView(selection, { y: "center" }),
-    });
-  } else {
-    view.dispatch({
-      selection: searchRegister.original?.selection,
-    });
-    setTimeout(() => {
-      view.dispatch({
-        effects: searchRegister.original?.scroll,
-      });
-    });
-  }
+      if (!query?.valid) {
+        console.log(`SEARCH invalid query`);
+        return;
+      }
+
+      let match = query.getCursor(view.state, initialSelection.main.to).next();
+
+      if (match.done) {
+        match = query.getCursor(view.state).next();
+      }
+
+      if (!match.done) {
+        const selection = EditorSelection.range(
+          match.value.from,
+          match.value.to
+        );
+
+        view.dispatch({
+          selection,
+          effects: EditorView.scrollIntoView(selection, { y: "center" }),
+        });
+      } else {
+        console.log(`SEARCH no match`);
+      }
+    },
+
+    onClose(accept: boolean) {
+      if (!accept) {
+        reset();
+
+        return;
+      }
+
+      if (input != null) {
+        view.dispatch({
+          effects: yankEffect.of(["/", input]),
+        });
+      }
+    },
+  };
 }
+
+function searchQuery(query: string) {
+  return new SearchQuery({
+    search: query,
+    regexp: true,
+    caseSensitive: /[A-Z]/.test(query),
+  });
+}
+
+const searchFacet = Facet.define<string, SearchQuery>({
+  combine(inputs) {
+    const input = inputs[0] ?? "";
+
+    return searchQuery(input);
+  },
+});
 
 type NonInsertMode = Exclude<
   ModeState,
@@ -269,20 +317,6 @@ const helixCommandBindings: {
       });
     },
     ["/"](view) {
-      view.dispatch({
-        effects: searchEffect.of({
-          type: SearchEffKind.Start,
-          snapshot: {
-            selection: view.state.selection,
-            scroll: view.scrollSnapshot(),
-          },
-        }),
-      });
-
-      view.dispatch({
-        effects: setSearchQuery.of(new SearchQuery({ search: "" })),
-      });
-
       const panel = getCommandPanel(view);
 
       panel.showSearchInput();
@@ -311,7 +345,10 @@ const helixCommandBindings: {
       const range = helixSelection(selection, view.state.doc);
 
       view.dispatch({
-        effects: yankEffect.of(view.state.doc.slice(range.from, range.to)),
+        effects: yankEffect.of([
+          `"`,
+          view.state.doc.slice(range.from, range.to),
+        ]),
       });
 
       getCommandPanel(view).showMessage('yanked 1 selection to register "');
@@ -360,7 +397,7 @@ const helixCommandBindings: {
 
         view.dispatch({
           effects: [
-            yankEffect.of(view.state.doc.slice(range.from, range.to)),
+            yankEffect.of([`"`, view.state.doc.slice(range.from, range.to)]),
             MODE_EFF.INSERT,
           ],
           changes: {
@@ -380,7 +417,7 @@ const helixCommandBindings: {
 
         view.dispatch({
           effects: [
-            yankEffect.of(view.state.doc.slice(range.from, range.to)),
+            yankEffect.of([`"`, view.state.doc.slice(range.from, range.to)]),
             MODE_EFF.NORMAL,
           ],
           changes: {
@@ -393,23 +430,23 @@ const helixCommandBindings: {
     ["P"]: {
       checkpoint: true,
       command(view, mode) {
-        const yanked = view.state.field(registerField);
+        const yanked = view.state.field(registersField);
 
-        paste(view, yanked, false, cmdCount(mode));
+        paste(view, yanked[`"`], false, cmdCount(mode));
       },
     },
     ["p"]: {
       checkpoint: true,
       command(view, mode) {
-        const yanked = view.state.field(registerField);
+        const yanked = view.state.field(registersField);
 
-        paste(view, yanked, true, cmdCount(mode));
+        paste(view, yanked[`"`], true, cmdCount(mode));
       },
     },
     ["R"]: {
       checkpoint: true,
       command(view, mode) {
-        const contents = view.state.field(registerField);
+        const contents = view.state.field(registersField)[`"`] ?? "";
         const count = cmdCount(mode);
         const replacement =
           count === 1 ? contents : contents.toString().repeat(count);
@@ -625,7 +662,7 @@ const helixCommandBindings: {
 
       if (perfectLineSelection || mode.count) {
         const nextLineNumber = Math.min(
-          endLine.number + (mode.count ?? 1),
+          endLine.number + cmdCount(mode),
           view.state.doc.lines
         );
         const nextLine = view.state.doc.line(nextLineNumber);
@@ -642,13 +679,14 @@ const helixCommandBindings: {
       return true;
     },
     ["n"](view, mode) {
-      const register = view.state.field(searchRegisterField);
+      const query = view.state.facet(searchFacet);
+      // const register = view.state.field(searchRegisterField);
 
-      const active = register.active;
+      // const query = register.active;
 
-      if (!active?.valid) {
-        if (active) {
-          showSearchError(view, active);
+      if (!query?.valid) {
+        if (query) {
+          showSearchError(view, query);
         }
 
         view.dispatch({
@@ -658,7 +696,7 @@ const helixCommandBindings: {
         return true;
       }
 
-      let cursor = active.getCursor(view.state, view.state.selection.main.to);
+      let cursor = query.getCursor(view.state, view.state.selection.main.to);
 
       let match;
 
@@ -670,7 +708,7 @@ const helixCommandBindings: {
         found ||= !match.done;
 
         if (match.done) {
-          cursor = active.getCursor(view.state);
+          cursor = query.getCursor(view.state);
           wrapped = true;
           match = cursor.next();
           found ||= !match.done;
@@ -693,26 +731,26 @@ const helixCommandBindings: {
       }
     },
     ["N"](view, mode) {
-      const register = view.state.field(searchRegisterField);
+      const query = view.state.facet(searchFacet);
 
-      const active = register.active;
-
-      if (!active?.valid) {
-        if (active) {
-          showSearchError(view, active);
+      if (!query?.valid) {
+        if (query) {
+          showSearchError(view, query);
         }
 
         return true;
       }
 
       type Match = { from: number; to: number };
-      const select = (match: Match) =>
+      const select = (match: Match) => {
+        const selection = EditorSelection.range(match.from, match.to);
         view.dispatch({
-          selection: EditorSelection.range(match.from, match.to),
-          scrollIntoView: true,
+          selection: selection,
+          effects: EditorView.scrollIntoView(selection, { y: "center" }),
         });
+      };
 
-      const cursor = active.getCursor(view.state);
+      const cursor = query.getCursor(view.state);
       const selection = view.state.selection.main;
 
       const count = cmdCount(mode);
@@ -859,15 +897,18 @@ const helixCommandBindings: {
         .toString();
 
       view.dispatch({
-        effects: searchEffect.of({
-          type: SearchEffKind.Exit,
-          query: new SearchQuery({
-            search: selected,
-            caseSensitive: /[A-Z]/.test(selected),
-            regexp: false,
-          }),
-        }),
+        effects: yankEffect.of(["/", selected]),
       });
+      // view.dispatch({
+      //   effects: searchEffect.of({
+      //     type: SearchEffKind.Exit,
+      //     query: new SearchQuery({
+      //       search: selected,
+      //       caseSensitive: /[A-Z]/.test(selected),
+      //       regexp: false,
+      //     }),
+      //   }),
+      // });
 
       getCommandPanel(view).showMessage(`register '/' set to '${selected}'`);
     },
@@ -1045,12 +1086,14 @@ const helixCommandBindings: {
 
 function paste(
   view: ViewProxy,
-  yanked: string | Text,
+  yanked: string | Text | undefined,
   before: boolean,
   count: number,
   reset = true
 ) {
   const range = view.state.selection.main;
+
+  yanked ??= "";
 
   const spec = { from: range.to, insert: yanked.toString().repeat(count) };
 
@@ -1470,19 +1513,17 @@ export function helix(options: ExtensionOptions = {}): Extension {
     helixKeymap,
     modeField,
     historyField,
-    registerField,
-    searchRegisterField,
+    registersField,
+    searchFacet.from(
+      registersField,
+      (registers) => registers["/"]?.toString() ?? ""
+    ),
     changeFilter,
     inputHandler,
     cursorField,
     updateListener,
     showPanel.of(statusPanel),
     showPanel.of(commandPanel),
-    search({
-      scrollToMatch(range) {
-        return EditorView.scrollIntoView(range, { y: "center" });
-      },
-    }),
     ViewPlugin.define((view) => {
       const cursorShape = options["editor.cursor-shape.insert"];
 
@@ -1563,7 +1604,7 @@ export function helix(options: ExtensionOptions = {}): Extension {
 }
 
 function commandPanel(view: EditorView) {
-  return new CommandPanel(view, commandFacet, addSearch);
+  return new CommandPanel(view, commandFacet, () => startSearch(view));
 }
 
 function getCommandPanel(view: EditorView) {
@@ -1886,4 +1927,12 @@ function cloned<T, R, N>(iter: Iterator<T, R, N>) {
       return { ...iter.next() };
     },
   };
+}
+
+function resetScroll(view: EditorView, effect: StateEffect<any>) {
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      view.dispatch({ effects: effect });
+    })
+  );
 }

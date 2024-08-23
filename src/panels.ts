@@ -1,12 +1,7 @@
 import { EditorView, Panel } from "@codemirror/view";
-import {
-  SearchQuery,
-  getSearchQuery,
-  setSearchQuery,
-} from "@codemirror/search";
 import { EditorSelection, FacetReader } from "@codemirror/state";
 import type { TypableCommand } from "./lib";
-import { SearchEffKind, modeStatus, searchEffect } from "./state";
+import { modeStatus } from "./state";
 import { ModeState } from "./entities";
 
 export const panelStyles = EditorView.theme({
@@ -54,8 +49,11 @@ export class CommandPanel implements Panel {
 
   constructor(
     private view: EditorView,
-    private facet: FacetReader<TypableCommand[]>,
-    private addSearch: (view: EditorView, query: SearchQuery) => void
+    private commandFacet: FacetReader<TypableCommand[]>,
+    private startSearch: () => {
+      onInput(input: string): void;
+      onClose(accept: boolean): void;
+    }
   ) {
     this.dom = el("div") as any;
 
@@ -170,7 +168,7 @@ export class CommandPanel implements Panel {
         const [cmd, ...args] = value.split(/ +/);
 
         if (commit && cmd) {
-          const commands = view.state.facet(this.facet);
+          const commands = view.state.facet(this.commandFacet);
 
           const command = commands.find(
             (command) =>
@@ -227,7 +225,7 @@ export class CommandPanel implements Panel {
           return;
         }
 
-        const commands = view.state.facet(this.facet);
+        const commands = view.state.facet(this.commandFacet);
 
         const options = commands.filter(
           (command) =>
@@ -337,47 +335,51 @@ export class CommandPanel implements Panel {
   }
 
   private searchInput() {
-    const { view } = this;
+    const search = this.startSearch();
 
     return this.createInput({
       onClose: (commit) => {
-        this.closeSearchInput(commit);
+        search.onClose(commit);
+        this.closeInput();
+        // this.closeSearchInput(commit);
       },
+
       onInput: (value) => {
-        const query = new SearchQuery({
-          search: value,
-          regexp: true,
-          caseSensitive: false,
-        });
+        search.onInput(value);
+        // const query = new SearchQuery({
+        //   search: value,
+        //   regexp: true,
+        //   caseSensitive: false,
+        // });
 
-        const effect = setSearchQuery.of(query);
+        // const effect = setSearchQuery.of(query);
 
-        view.dispatch({ effects: effect });
+        // view.dispatch({ effects: effect });
 
-        this.addSearch(view, query);
+        // this.startSearch(view, query);
       },
     });
   }
 
-  private closeSearchInput(accept: boolean) {
-    const empty = new SearchQuery({ search: "" });
+  // private closeSearchInput(accept: boolean) {
+  //   const empty = new SearchQuery({ search: "" });
 
-    if (!accept) {
-      this.addSearch(this.view, empty);
-    }
+  //   if (!accept) {
+  //     this.startSearch(this.view, empty);
+  //   }
 
-    this.view.dispatch({
-      effects: [
-        searchEffect.of({
-          type: SearchEffKind.Exit,
-          query: accept ? getSearchQuery(this.view.state) : undefined,
-        }),
-        setSearchQuery.of(empty),
-      ],
-    });
+  //   this.view.dispatch({
+  //     effects: [
+  //       searchEffect.of({
+  //         type: SearchEffKind.Exit,
+  //         query: accept ? getSearchQuery(this.view.state) : undefined,
+  //       }),
+  //       setSearchQuery.of(empty),
+  //     ],
+  //   });
 
-    this.closeInput();
-  }
+  //   this.closeInput();
+  // }
 
   private closeInput(hide = true) {
     this.inputContainer.removeChild(this.inputContainer.lastChild!);

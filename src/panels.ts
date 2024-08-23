@@ -4,9 +4,10 @@ import {
   getSearchQuery,
   setSearchQuery,
 } from "@codemirror/search";
-import { FacetReader } from "@codemirror/state";
+import { EditorSelection, FacetReader } from "@codemirror/state";
 import type { TypableCommand } from "./lib";
-import { SearchEffKind, searchEffect } from "./state";
+import { SearchEffKind, modeStatus, searchEffect } from "./state";
+import { ModeState } from "./entities";
 
 export const panelStyles = EditorView.theme({
   ".cm-hx-status-panel": {
@@ -62,15 +63,15 @@ export class CommandPanel implements Panel {
     this.inputContainer = el("span");
     this.commandPopup = el("div");
 
-    this.dom.insertBefore(this.inputContainer, null);
-    this.dom.insertBefore(this.minorCommand, null);
-    this.dom.insertBefore(this.commandPopup, null);
+    $append(this.dom, this.inputContainer);
+    $append(this.dom, this.minorCommand);
+    $append(this.dom, this.commandPopup);
 
     this.dom.classList.add("cm-hx-command-panel");
 
-    this.inputContainer.style.visibility = "hidden";
+    $style(this.inputContainer, { visibility: "hidden" });
     this.label = el("span");
-    this.inputContainer.insertBefore(this.label, null);
+    $append(this.inputContainer, this.label);
 
     this.commandPopup.classList.add("cm-hx-command-popup");
 
@@ -81,11 +82,10 @@ export class CommandPanel implements Panel {
     this.help.classList.add("cm-hx-command-help");
     this.autocomplete.classList.add("cm-hx-command-autocomplete");
 
-    this.commandPopup.insertBefore(this.help, null);
-    this.commandPopup.insertBefore(this.autocomplete, null);
+    $append(this.commandPopup, this.help);
+    $append(this.commandPopup, this.autocomplete);
 
-    this.minorCommand.style.minWidth = "8em";
-    this.minorCommand.style.textAlign = "center";
+    $style(this.minorCommand, { minWidth: "8em", textAlign: "center " });
   }
 
   showSearchInput() {
@@ -100,19 +100,16 @@ export class CommandPanel implements Panel {
     this.showInput(input, ":");
   }
 
-  showMinor(command: string | null) {
-    if (command) {
-      this.minorCommand.textContent = command;
-    } else {
-      this.minorCommand.innerHTML = "&nbsp;";
-    }
+  showMinor(command: ModeState) {
+    this.minorCommand.textContent = modeStatus(command);
   }
 
   private showInput(input: HTMLElement, label: string) {
     this.label.textContent = label;
-    this.label.style.color = "";
-    this.inputContainer.insertBefore(input, null);
-    this.inputContainer.style.visibility = "";
+    $style(this.label, { color: "" });
+
+    $append(this.inputContainer, input);
+    $style(this.inputContainer, { visibility: "" });
 
     input.focus();
   }
@@ -129,7 +126,12 @@ export class CommandPanel implements Panel {
     input.classList.add("cm-hx-command-input");
     input.type = "text";
 
-    input.addEventListener("blur", () => onClose(false, input.value));
+    let open = true;
+    input.addEventListener("blur", () => {
+      if (open) {
+        onClose(false, input.value);
+      }
+    });
 
     input.addEventListener("input", () => {
       onInput(input.value);
@@ -143,6 +145,8 @@ export class CommandPanel implements Panel {
       const isEnter = event.key === "Enter";
 
       if (isEnter || event.key === "Escape") {
+        open = false;
+
         onClose(isEnter, input.value);
       }
     });
@@ -152,6 +156,11 @@ export class CommandPanel implements Panel {
 
   private commandInput() {
     const { view } = this;
+
+    const initialSelection = view.state.selection;
+    const initialScroll = view.scrollSnapshot();
+
+    const isNumber = (cmd: string) => /^\d+$/.test(cmd);
 
     // FIXME: tab completion
     return this.createInput({
@@ -181,6 +190,16 @@ export class CommandPanel implements Panel {
 
             return;
           }
+        } else if (!commit && isNumber(cmd)) {
+          view.dispatch({
+            selection: initialSelection,
+          });
+
+          setTimeout(() => {
+            view.dispatch({
+              effects: initialScroll,
+            });
+          });
         }
 
         this.closeInput();
@@ -190,6 +209,21 @@ export class CommandPanel implements Panel {
 
         if (!cmd) {
           this.hidePopup();
+          return;
+        }
+
+        if (isNumber(cmd)) {
+          const lineNo = Number(cmd);
+
+          if (lineNo >= 1 && lineNo <= view.state.doc.lines) {
+            const line = view.state.doc.line(lineNo);
+
+            view.dispatch({
+              selection: EditorSelection.cursor(line.from),
+              effects: EditorView.scrollIntoView(line.from, { y: "center" }),
+            });
+          }
+
           return;
         }
 
@@ -219,9 +253,9 @@ export class CommandPanel implements Panel {
   }
 
   showMessage(message: string, error?: boolean) {
-    this.inputContainer.style.visibility = "";
+    $style(this.inputContainer, { visibility: "" });
     this.message = true;
-    this.label.style.color = error ? "red" : "";
+    $style(this.label, { color: error ? "red" : "" });
     this.label.textContent = message;
   }
 
@@ -238,7 +272,7 @@ export class CommandPanel implements Panel {
     if (this.message) {
       this.message = false;
       this.label.textContent = "";
-      this.inputContainer.style.visibility = "hidden";
+      $style(this.inputContainer, { visibility: "hidden" });
     }
   }
 
@@ -259,9 +293,9 @@ export class CommandPanel implements Panel {
 
     while (commands.length > this.autocomplete.childNodes.length) {
       const entry = el("span");
-      entry.style.marginRight = "1em";
+      $style(entry, { marginRight: "1em" });
 
-      this.autocomplete.insertBefore(entry, null);
+      $append(this.autocomplete, entry);
     }
 
     for (const [i, child] of this.autocomplete.childNodes.entries()) {
@@ -296,8 +330,10 @@ export class CommandPanel implements Panel {
 
     const box = this.inputContainer.getBoundingClientRect();
 
-    this.commandPopup.style.bottom = `${window.innerHeight - box.top}px`;
-    this.commandPopup.style.left = `${box.left}px`;
+    $style(this.commandPopup, {
+      bottom: `${window.innerHeight - box.top}px`,
+      left: `${box.left}px`,
+    });
   }
 
   private searchInput() {
@@ -324,13 +360,19 @@ export class CommandPanel implements Panel {
   }
 
   private closeSearchInput(accept: boolean) {
+    const empty = new SearchQuery({ search: "" });
+
+    if (!accept) {
+      this.addSearch(this.view, empty);
+    }
+
     this.view.dispatch({
       effects: [
         searchEffect.of({
           type: SearchEffKind.Exit,
           query: accept ? getSearchQuery(this.view.state) : undefined,
         }),
-        setSearchQuery.of(new SearchQuery({ search: "" })),
+        setSearchQuery.of(empty),
       ],
     });
 
@@ -341,7 +383,7 @@ export class CommandPanel implements Panel {
     this.inputContainer.removeChild(this.inputContainer.lastChild!);
 
     if (hide) {
-      this.inputContainer.style.visibility = "hidden";
+      $style(this.inputContainer, { visibility: "hidden" });
     }
 
     requestAnimationFrame(() => {
@@ -358,11 +400,11 @@ export function statusPanel(view: EditorView) {
   const mode = el("span");
 
   mode.textContent = "NOR";
-  dom.insertBefore(mode, null);
+  $append(dom, mode);
 
   const pos = el("span");
 
-  dom.insertBefore(pos, null);
+  $append(dom, pos);
 
   function setLineCol() {
     const { line, column } = lineCol(view);
@@ -392,4 +434,12 @@ function lineCol(view: EditorView) {
 
 function el(tag: string) {
   return document.createElement(tag);
+}
+
+function $append(el: HTMLElement, child: HTMLElement) {
+  el.insertBefore(child, null);
+}
+
+function $style(el: HTMLElement, styles: Partial<CSSStyleDeclaration>) {
+  Object.assign(el.style, styles);
 }

@@ -32,6 +32,52 @@ export function sameMode(mode: ModeState, otherMode: ModeState) {
   );
 }
 
+export function sameModeState(mode: ModeState, otherMode: ModeState) {
+  return (
+    sameMode(mode, otherMode) &&
+    (mode as any).count === (otherMode as any).count &&
+    (mode as any).expecting === (otherMode as any).expecting
+  );
+}
+
+export function modeStatus(mode: ModeState) {
+  let result = "";
+
+  if (mode.type === ModeType.Insert) {
+    return result;
+  }
+
+  if (mode.count) {
+    result += mode.count;
+  }
+
+  result += minorModeStr(mode.minor);
+
+  if (mode.expecting) {
+    result += mode.expecting.minor;
+  }
+
+  return result;
+}
+
+function minorModeStr(minor: MinorMode) {
+  switch (minor) {
+    case MinorMode.Normal:
+      return "";
+    case MinorMode.Goto:
+      return "g";
+    case MinorMode.Match:
+      return "m";
+    case MinorMode.Space:
+      return "<space>";
+    default: {
+      if (process.env.NODE_ENV === "development") {
+        throw new Error("Unexpected mode");
+      }
+    }
+  }
+}
+
 export const yankEffect = StateEffect.define<string | Text>();
 
 export const registerField = StateField.define<string | Text>({
@@ -51,7 +97,10 @@ export const registerField = StateField.define<string | Text>({
 
 export type SearchRegister = {
   active: SearchQuery | null;
-  original?: EditorSelection;
+  original?: {
+    selection: EditorSelection;
+    scroll: StateEffect<any>;
+  };
 };
 
 export const searchRegisterField = StateField.define<SearchRegister>({
@@ -66,7 +115,7 @@ export const searchRegisterField = StateField.define<SearchRegister>({
 
         switch (effectValue.type) {
           case SearchEffKind.Start: {
-            search = { ...search, original: effectValue.selection };
+            search = { ...search, original: effectValue.snapshot };
 
             break;
           }
@@ -94,7 +143,10 @@ export const enum SearchEffKind {
 export const searchEffect = StateEffect.define<
   | {
       type: SearchEffKind.Start;
-      selection: EditorSelection;
+      snapshot: {
+        selection: EditorSelection;
+        scroll: StateEffect<any>;
+      };
     }
   | {
       type: SearchEffKind.Exit;
@@ -105,7 +157,7 @@ export const searchEffect = StateEffect.define<
 type HistoryEffect =
   | {
       type: "move";
-      offset: 1 | -1;
+      offset: number;
       head?: EditorState;
     }
   | {

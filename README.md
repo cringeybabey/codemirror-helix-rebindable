@@ -12,9 +12,9 @@ npm install codemirror-helix
 
 ```typescript
 import { EditorView } from "@codemirror/view";
-import { helix, commandFacet } from "codemirror-helix";
+import { helix, commands } from "codemirror-helix";
 
-const customCommands = commandFacet.of([
+const customCommands = commands.of([
   {
     name: "save",
     aliases: ["s", "sv"],
@@ -31,6 +31,40 @@ const view = new EditorView({
   parent: document.querySelector("#editor"),
 });
 ```
+
+## External commands
+
+This plugin only augments the behavior of a single editor element, a single "tab". Some Helix commands, however, only make sense in a "project" context, where
+there are multiple files to edit, search, etc. The `externalCommands` facet allows you to define callbacks for these multi-editor commands:
+
+```typescript
+import { EditorView } from "@codemirror/view";
+import { helix, externalCommands } from "codemirror-helix";
+
+const view = new EditorView({
+  doc: "",
+  extensions: [
+    helix(),
+    externalCommands.of({
+      file_picker() {
+        showFilePicker();
+      },
+      global_search(input: string) {
+        seachProjectAndShowResults(input);
+      },
+      // ...
+    }),
+  ],
+  parent: document.querySelector("#editor"),
+});
+```
+
+In a multi-editor setup, you will probably need to sync some global state between editors (for instance, the values of the registers). You can either:
+
+- Serialize the state of an editor (with `snapshot()`) and pass it as initial state to `helix()`, or
+- Create a set of transactions using `sync()` and dispatch them into another editor.
+
+See the code for the playground in `demo/main.ts` for an example of a multi-editor setup.
 
 ## License
 

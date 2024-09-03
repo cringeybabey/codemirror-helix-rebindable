@@ -71,17 +71,21 @@ function minorModeStr(minor: MinorMode) {
   }
 }
 
-export const yankEffect = StateEffect.define<[string, string | Text]>();
+export const yankEffect = StateEffect.define<
+  [string, string | Text] | { reset: Record<string, string | Text> }
+>();
 
-export const registersField = StateField.define<
-  Record<string, string | Text | undefined>
->({
+export const registersField = StateField.define<Record<string, string | Text>>({
   create() {
     return {};
   },
   update(registers, tr) {
     for (const effect of tr.effects) {
       if (effect.is(yankEffect)) {
+        if (!Array.isArray(effect.value)) {
+          return effect.value.reset;
+        }
+
         const [reg, value] = effect.value;
 
         if (value.length === 0) {

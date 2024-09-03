@@ -37,14 +37,12 @@ import {
   Facet,
   SelectionRange,
   StateEffect,
-  StateField,
   Text,
   Transaction,
   TransactionSpec,
 } from "@codemirror/state";
 import {
   Decoration,
-  DecorationSet,
   EditorView,
   KeyBinding,
   ViewPlugin,
@@ -69,7 +67,12 @@ import {
   sameModeState,
   yankEffect,
 } from "./state";
-import { CommandPanel, panelStyles, statusPanel } from "./panels";
+import {
+  CommandPanel,
+  CommandPanelMessage,
+  panelStyles,
+  statusPanel,
+} from "./panels";
 
 const MODE_EFF = {
   NORMAL: modeEffect.of({
@@ -156,7 +159,7 @@ function moveRight(view: EditorView, mode: NonInsertMode) {
   moveBy(view, mode, cursorCharRight, selectCharRight);
 }
 
-function startSearch(view: EditorView) {
+function startSearch(view: EditorView, global: boolean) {
   const initialScroll = view.scrollSnapshot();
   const initialSelection = view.state.selection;
 
@@ -172,17 +175,20 @@ function startSearch(view: EditorView) {
   }
 
   return {
+    init: view.state.field(registersField)["/"]?.toString() ?? "",
     onInput(input_: string) {
       if (input !== input_) {
         input = input_;
         query = searchQuery(input);
       } else {
-        console.log(`SEARCH no changes`);
         return;
       }
 
       if (!query?.valid) {
-        console.log(`SEARCH invalid query`);
+        return;
+      }
+
+      if (global) {
         return;
       }
 
@@ -202,8 +208,6 @@ function startSearch(view: EditorView) {
           selection,
           effects: EditorView.scrollIntoView(selection, { y: "center" }),
         });
-      } else {
-        console.log(`SEARCH no match`);
       }
     },
 
@@ -214,10 +218,20 @@ function startSearch(view: EditorView) {
         return;
       }
 
+      // TODO: previous value
       if (input != null) {
         view.dispatch({
           effects: yankEffect.of(["/", input]),
         });
+      }
+
+      if (global) {
+        const externalCommands = view.state.facet(externalCommandsFacet);
+        const query = input || view.state.field(registersField)["/"];
+
+        if (query) {
+          return externalCommands.global_search?.(query.toString());
+        }
       }
     },
   };
@@ -231,11 +245,11 @@ function searchQuery(query: string) {
   });
 }
 
-const searchFacet = Facet.define<string, SearchQuery>({
+const searchFacet = Facet.define<string | undefined, SearchQuery | undefined>({
   combine(inputs) {
-    const input = inputs[0] ?? "";
+    const input = inputs[0];
 
-    return searchQuery(input);
+    return input ? searchQuery(input) : undefined;
   },
 });
 
@@ -337,7 +351,11 @@ const helixCommandBindings: {
         },
       ])
     ),
-    [":"](view) {
+    [":"](view, mode) {
+      view.dispatch({
+        effects: modeEffect.of({ ...mode, count: undefined }),
+      });
+
       getCommandPanel(view).showCommandInput();
     },
     ["y"](view) {
@@ -680,9 +698,6 @@ const helixCommandBindings: {
     },
     ["n"](view, mode) {
       const query = view.state.facet(searchFacet);
-      // const register = view.state.field(searchRegisterField);
-
-      // const query = register.active;
 
       if (!query?.valid) {
         if (query) {
@@ -715,7 +730,7 @@ const helixCommandBindings: {
         }
 
         if (!found) {
-          getCommandPanel(view).showMessage("No more matches", true);
+          getCommandPanel(view).showError("No more matches");
 
           return;
         }
@@ -788,7 +803,7 @@ const helixCommandBindings: {
       const total = afterRing.length + beforeRing.length;
 
       if (total === 0) {
-        getCommandPanel(view).showMessage("No more matches", true);
+        getCommandPanel(view).showError("No more matches");
         return;
       }
 
@@ -998,6 +1013,30 @@ const helixCommandBindings: {
         effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
       });
     },
+    ["n"](view, mode) {
+      const externalCommandDefs = view.state.facet(externalCommandsFacet);
+
+      const result = externalCommandDefs[":buffer-next"]?.();
+
+      getCommandPanel(view).showMessage(result);
+
+      view.dispatch({
+        effects:
+          mode.type === ModeType.Normal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
+      });
+    },
+    ["p"](view, mode) {
+      const externalCommandDefs = view.state.facet(externalCommandsFacet);
+
+      const result = externalCommandDefs[":buffer-previous"]?.();
+
+      getCommandPanel(view).showMessage(result);
+
+      view.dispatch({
+        effects:
+          mode.type === ModeType.Normal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
+      });
+    },
   },
   match: {
     ["s"]: {
@@ -1080,6 +1119,43 @@ const helixCommandBindings: {
           view.dispatch(tr);
         });
       },
+    },
+    ["f"](view, mode) {
+      const externalCommandDefs = view.state.facet(externalCommandsFacet);
+
+      const result = externalCommandDefs.file_picker?.();
+
+      getCommandPanel(view).showMessage(result);
+
+      view.dispatch({
+        effects:
+          mode.type === ModeType.Normal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
+      });
+    },
+    ["b"](view, mode) {
+      const externalCommandsDef = view.state.facet(externalCommandsFacet);
+
+      const result = externalCommandsDef.buffer_picker?.();
+
+      getCommandPanel(view).showMessage(result);
+
+      view.dispatch({
+        effects:
+          mode.type === ModeType.Normal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
+      });
+    },
+    ["/"](view, mode) {
+      const enabled =
+        view.state.facet(externalCommandsFacet).global_search != null;
+
+      if (enabled) {
+        getCommandPanel(view).showSearchInput(true);
+      }
+
+      view.dispatch({
+        effects:
+          mode.type === ModeType.Normal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
+      });
     },
   },
 };
@@ -1345,19 +1421,20 @@ class EndLineCursor extends WidgetType {
 const cursorMark = Decoration.mark({ class: "cm-hx-cursor" });
 const endlineCursorWidget = Decoration.widget({ widget: new EndLineCursor() });
 
-const cursorField = StateField.define<DecorationSet>({
-  create(state) {
-    return drawCursorMark(state.selection, state.doc);
-  },
+// // TODO: should this be a facet?
+// const cursorField = StateField.define<DecorationSet>({
+//   create(state) {
+//     return drawCursorMark(state.selection, state.doc);
+//   },
 
-  update(_value, tr) {
-    return drawCursorMark(tr.newSelection, tr.newDoc);
-  },
+//   update(_value, tr) {
+//     return drawCursorMark(tr.newSelection, tr.newDoc);
+//   },
 
-  provide(field) {
-    return EditorView.decorations.from(field);
-  },
-});
+//   provide(field) {
+//     return EditorView.decorations.from(field);
+//   },
+// });
 
 function drawCursorMark(selection: EditorSelection, doc: Text) {
   const head = selection.main.head;
@@ -1449,15 +1526,111 @@ const updateListener = EditorView.updateListener.of((viewUpdate) => {
 
 const helixKeymap = keymap.of(toCodemirrorKeymap(helixCommandBindings));
 
+type ExternalCommand =
+  | "file_picker"
+  | "buffer_picker"
+  | ":buffer-next"
+  | ":buffer-close"
+  | ":buffer-previous";
+
+type ExternalCommandHandler = () => CommandPanelMessage | void;
+
+type ExternalCommandsDefinition = Partial<
+  Record<ExternalCommand, ExternalCommandHandler>
+> & {
+  global_search?(input: string): void | CommandPanelMessage;
+};
+
+/**
+ * A facet that allows to define external commands.
+ */
+const externalCommandsFacet = Facet.define<
+  ExternalCommandsDefinition,
+  ExternalCommandsDefinition
+>({
+  combine(values) {
+    const handlers = [...values];
+    handlers.reverse();
+
+    if (process.env.NODE_ENV === "development") {
+      const merged = values.reduce((acc, defs) => {
+        for (const key of Object.keys(defs)) {
+          if (acc[key] == null) {
+            acc[key] = 1;
+          } else {
+            acc[key]++;
+          }
+        }
+
+        return acc;
+      }, {} as Record<string, number>);
+
+      const multiple = Object.entries(merged).flatMap(([key, count]) =>
+        count > 1 ? [key] : []
+      );
+
+      if (multiple.length > 0) {
+        console.warn(
+          `Multiple definitions found for external commands: ${multiple.join(
+            ", "
+          )}`
+        );
+      }
+    }
+
+    return handlers.reduce((acc, def) => {
+      return { ...acc, ...def };
+    }, {});
+  },
+});
+
+export { externalCommandsFacet as externalCommands };
+
+/**
+ * Creates a snapshot of the extension state suitable to initialize
+ * the extension later (see `init` and `globalInit`). Snapshots are JSON-serializable.
+ *
+ * If `global` is true, the snapshot only contains global state. This way
+ * it is slimmer, but it is only valid for `globalInit`.
+ */
+export function snapshot(state: EditorState, global = false): Object {
+  return {
+    registers: state.field(registersField),
+    ...(global
+      ? {}
+      : {
+          history: state.field(historyField),
+        }),
+  };
+}
+
+/**
+ * Generates a list of transactions that can be dispatched to
+ * another editor to ensure that its global state is synchronized
+ * with `state`.
+ */
+export function globalStateSync(state: EditorState): TransactionSpec[] {
+  return [
+    {
+      effects: yankEffect.of({ reset: state.field(registersField) }),
+    },
+  ];
+}
+
 /**
  * A facet to define typable commands. No effort is made to prevent overrides,
  * collisions, etc.
  */
-export const commandFacet = Facet.define<TypableCommand[], TypableCommand[]>({
+export const commands = Facet.define<TypableCommand[], TypableCommand[]>({
   combine(commands) {
     return commands.flat();
   },
 });
+
+/**
+ * An effect to reset the mode of an editor.
+ */
+export const resetMode: StateEffect<any> = MODE_EFF.NORMAL;
 
 /**
  * A command that can be typed in command mode `:`.
@@ -1473,17 +1646,30 @@ export interface TypableCommand {
    */
   // TODO: offer a way to influence edits history
   // TODO: offer way to make command interactive as the user types (e.g. `:g`)
-  handler(
-    view: EditorView,
-    args: any[]
-  ): { message: string; error?: boolean } | void;
+  handler(view: EditorView, args: any[]): CommandPanelMessage | void;
+}
+
+export interface Options {
+  config?: Config;
+
+  /**
+   * If provided, sets the extension initial state from a previous state, or a snapshot
+   * created by `snapshot()`.
+   */
+  init?: EditorState | Object;
+
+  /**
+   * Like `init`, but it will only restore global state that should be shared between different "tabs".
+   * For instance, registers are global state, while undo/redo history is not.
+   */
+  globalInit?: EditorState | Object;
 }
 
 /**
- * Options to configure the extension.
+ * Editor configuration.
  * The names follow Helix's options' naming.
  */
-export interface ExtensionOptions {
+export interface Config {
   "editor.cursor-shape.insert"?: "block" | "bar";
 }
 
@@ -1492,7 +1678,21 @@ export interface ExtensionOptions {
  *
  * It provides Helix-like keybindings, plus two panels to emulate the statusline and the commandline.
  */
-export function helix(options: ExtensionOptions = {}): Extension {
+export function helix(options: Options = {}): Extension {
+  const registerState = options.globalInit ?? options.init;
+  const initialRegisters =
+    registerState instanceof EditorState
+      ? registerState.field(registersField)
+      : registerState
+      ? (registerState as any).registers
+      : undefined;
+  const initialHistory =
+    options.init instanceof EditorState
+      ? options.init.field(historyField)
+      : options.init
+      ? (options.init as any).history
+      : undefined;
+
   return [
     EditorView.theme({
       ".cm-hx-block-cursor .cm-cursor": {
@@ -1512,20 +1712,21 @@ export function helix(options: ExtensionOptions = {}): Extension {
     }),
     helixKeymap,
     modeField,
-    historyField,
-    registersField,
-    searchFacet.from(
-      registersField,
-      (registers) => registers["/"]?.toString() ?? ""
-    ),
+    initialHistory ? historyField.init(() => initialHistory) : historyField,
+    initialRegisters
+      ? registersField.init(() => initialRegisters)
+      : registersField,
+    searchFacet.from(registersField, (registers) => registers["/"]?.toString()),
     changeFilter,
     inputHandler,
-    cursorField,
+    EditorView.decorations.compute(["selection", "doc"], (state) => {
+      return drawCursorMark(state.selection, state.doc);
+    }),
     updateListener,
     showPanel.of(statusPanel),
     showPanel.of(commandPanel),
     ViewPlugin.define((view) => {
-      const cursorShape = options["editor.cursor-shape.insert"];
+      const cursorShape = options?.config?.["editor.cursor-shape.insert"];
 
       view.scrollDOM.classList.add("cm-hx-block-cursor");
 
@@ -1559,7 +1760,7 @@ export function helix(options: ExtensionOptions = {}): Extension {
         },
       };
     }),
-    commandFacet.of([
+    commands.of([
       {
         name: "goto",
         aliases: ["g"],
@@ -1600,11 +1801,35 @@ export function helix(options: ExtensionOptions = {}): Extension {
         },
       },
     ]),
+    commands.compute([externalCommandsFacet], (state) => {
+      const externalCommands = state.facet(externalCommandsFacet);
+
+      const hardcodedCommands: Array<[ExternalCommand, string, string[]]> = [
+        [":buffer-next", "Goto next buffer", ["bn", "bnext"]],
+        [":buffer-previous", "Goto previous buffer", ["bp", "bprev"]],
+        [":buffer-close", "Close the current buffer", ["bc", "bclose"]],
+      ];
+
+      return hardcodedCommands
+        .filter(([name]) => !!externalCommands[name])
+        .map(([name, help, aliases]) => ({
+          name: name.slice(1),
+          aliases,
+          help,
+          handler(view: EditorView) {
+            const defs = view.state.facet(externalCommandsFacet);
+
+            return defs[name]?.();
+          },
+        }));
+    }),
   ];
 }
 
 function commandPanel(view: EditorView) {
-  return new CommandPanel(view, commandFacet, () => startSearch(view));
+  return new CommandPanel(view, commands, (global) =>
+    startSearch(view, global)
+  );
 }
 
 function getCommandPanel(view: EditorView) {
@@ -1815,9 +2040,8 @@ function showSearchError(view: EditorView, query: SearchQuery) {
     message = error?.message;
   }
 
-  getCommandPanel(view).showMessage(
-    `Invalid regex /${query.search}/: ${message}`,
-    true
+  getCommandPanel(view).showError(
+    `Invalid regex /${query.search}/: ${message}`
   );
 }
 

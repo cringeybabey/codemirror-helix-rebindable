@@ -49,6 +49,8 @@ pages:
     - if: '$CI_COMMIT_BRANCH != "release"'
   script:
     - rm "$NPM_TOKEN"
+    - apt update
+    - apt install -y git
     - npm ci --cache npm_cache
     - cd demo && npm exec --no vite -- build --base="./"
   publish: demo/dist

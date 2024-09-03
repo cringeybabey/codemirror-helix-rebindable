@@ -92,7 +92,9 @@ async function wait(timeout: number) {
   await new Promise<void>((res) => setTimeout(() => res(), timeout));
 }
 
-function initEditor(text: string | string[]) {
+async function initEditor(text: string | string[]) {
+  await expect($(".ready")).toBePresent();
+
   return browser.execute(
     `initEditor(${JSON.stringify(
       Array.isArray(text) ? text.join("\n") : text

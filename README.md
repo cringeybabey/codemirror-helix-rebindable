@@ -62,9 +62,9 @@ const view = new EditorView({
 In a multi-editor setup, you will probably need to sync some global state between editors (for instance, the values of the registers). You can either:
 
 - Serialize the state of an editor (with `snapshot()`) and pass it as initial state to `helix()`, or
-- Create a set of transactions using `sync()` and dispatch them into another editor.
+- Create a set of transactions using `globalStateSync()` and dispatch them into another editor.
 
-See the code for the playground in `demo/main.ts` for an example of a multi-editor setup.
+See the code for the [playground](https://_rvidal.gitlab.io/codemirror-helix/) in [`demo/main.ts`](demo/main.ts) for an example of a multi-editor setup.
 
 ## License
 

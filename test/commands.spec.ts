@@ -46,6 +46,14 @@ const cases: Array<[string, string | string[], string[], Assertion]> = [
     ["v", "f", "o", "f", "o", "f", "e", "F", "d"],
     { selection: [0, 10] },
   ],
+  [
+    "search cancellation",
+    Array.from({ length: 200 }, (_, count) =>
+      String(count + 1).padStart(3, "0")
+    ),
+    ["/", "0", "5", "0", "Enter", "/", "1", "3", "0", "Escape"],
+    { selection: [196, 199] },
+  ],
 ];
 
 describe("codemirror-helix", () => {
@@ -58,9 +66,11 @@ describe("codemirror-helix", () => {
       await initEditor(text);
 
       for (const key of keys) {
-        await browser.keys(key);
         await (slow ? wait(1000) : undefined);
+        await browser.keys(key);
       }
+
+      await (slow ? wait(1000) : undefined);
 
       if (typeof expected === "string") {
         const doc = await getDoc();
@@ -82,7 +92,9 @@ async function wait(timeout: number) {
   await new Promise<void>((res) => setTimeout(() => res(), timeout));
 }
 
-function initEditor(text: string | string[]) {
+async function initEditor(text: string | string[]) {
+  await expect($(".ready")).toBePresent();
+
   return browser.execute(
     `initEditor(${JSON.stringify(
       Array.isArray(text) ? text.join("\n") : text
@@ -104,6 +116,12 @@ function toKeys(commands: string[]) {
     if (command.startsWith("Alt-")) {
       command = command.replace("Alt-", "");
       keys.push([Key.Alt, command]);
+      continue;
+    }
+
+    if (command.startsWith("Ctrl-")) {
+      command = command.replace("Ctrl-", "");
+      keys.push([Key.Ctrl, command]);
       continue;
     }
 

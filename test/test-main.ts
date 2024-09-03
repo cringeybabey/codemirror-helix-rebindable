@@ -40,3 +40,8 @@ window.onerror = (_event, _source, _lineno, _colno, error) => {
     })
   );
 };
+
+const ready = document.createElement("span");
+ready.classList.add("ready");
+
+document.body.append(ready);

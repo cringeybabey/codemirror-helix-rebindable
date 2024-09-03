@@ -20,7 +20,9 @@ export type ModeState =
   | {
       type: ModeType.Normal | ModeType.Select;
       minor: MinorMode;
+      count?: number;
       expecting?: {
+        minor: string;
         callback(view: EditorView, char: string, metadata: any): void;
         metadata: any;
       };

@@ -1,0 +1,41 @@
+.cm-editor {
+  height: 500px;
+}
+
+hx-picker .selected {
+  background: #ddd;
+}
+
+hx-picker {
+  font-family: monospace;
+  border: 1px solid #bbb;
+  position: absolute;
+  background: #f0f0f0;
+  top: 10em;
+  max-width: 80%;
+  min-width: 50%;
+  left: 50%;
+  transform: translate(-50%, 0);
+  padding: 1em;
+}
+
+hx-picker ul {
+  list-style: none;
+  padding: 0;
+  white-space: preserve;
+}
+
+hx-picker li {
+  cursor: default;
+}
+
+hx-picker .match {
+  font-weight: bold;
+}
+
+hx-picker input {
+  border: none;
+  outline: none;
+  background: inherit;
+  width: 100%;
+}

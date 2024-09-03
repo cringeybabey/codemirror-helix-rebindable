@@ -1,11 +1,4 @@
-import {
-  EditorSelection,
-  EditorState,
-  StateEffect,
-  StateField,
-  Text,
-} from "@codemirror/state";
-import { SearchQuery } from "@codemirror/search";
+import { EditorState, StateEffect, StateField, Text } from "@codemirror/state";
 import { MinorMode, ModeState, ModeType } from "./entities";
 
 export const modeEffect = StateEffect.define<ModeState>();
@@ -32,80 +25,87 @@ export function sameMode(mode: ModeState, otherMode: ModeState) {
   );
 }
 
-export const yankEffect = StateEffect.define<string | Text>();
+export function sameModeState(mode: ModeState, otherMode: ModeState) {
+  return (
+    sameMode(mode, otherMode) &&
+    (mode as any).count === (otherMode as any).count &&
+    (mode as any).expecting === (otherMode as any).expecting
+  );
+}
 
-export const registerField = StateField.define<string | Text>({
-  create() {
-    return "";
-  },
-  update(register, tr) {
-    for (const effect of tr.effects) {
-      if (effect.is(yankEffect)) {
-        register = effect.value;
+export function modeStatus(mode: ModeState) {
+  let result = "";
+
+  if (mode.type === ModeType.Insert) {
+    return result;
+  }
+
+  if (mode.count) {
+    result += mode.count;
+  }
+
+  result += minorModeStr(mode.minor);
+
+  if (mode.expecting) {
+    result += mode.expecting.minor;
+  }
+
+  return result;
+}
+
+function minorModeStr(minor: MinorMode) {
+  switch (minor) {
+    case MinorMode.Normal:
+      return "";
+    case MinorMode.Goto:
+      return "g";
+    case MinorMode.Match:
+      return "m";
+    case MinorMode.Space:
+      return "<space>";
+    default: {
+      if (process.env.NODE_ENV === "development") {
+        throw new Error("Unexpected mode");
       }
     }
+  }
+}
 
-    return register;
-  },
-});
+export const yankEffect = StateEffect.define<
+  [string, string | Text] | { reset: Record<string, string | Text> }
+>();
 
-export type SearchRegister = {
-  active: SearchQuery | null;
-  original?: EditorSelection;
-};
-
-export const searchRegisterField = StateField.define<SearchRegister>({
+export const registersField = StateField.define<Record<string, string | Text>>({
   create() {
-    return { active: null };
+    return {};
   },
-
-  update(search, tr) {
+  update(registers, tr) {
     for (const effect of tr.effects) {
-      if (effect.is(searchEffect)) {
-        const effectValue = effect.value;
+      if (effect.is(yankEffect)) {
+        if (!Array.isArray(effect.value)) {
+          return effect.value.reset;
+        }
 
-        switch (effectValue.type) {
-          case SearchEffKind.Start: {
-            search = { ...search, original: effectValue.selection };
+        const [reg, value] = effect.value;
 
-            break;
-          }
-          case SearchEffKind.Exit: {
-            search = {
-              original: undefined,
-              active: effectValue.query ?? search.active,
-            };
+        if (value.length === 0) {
+          const { [reg]: _reg, ...rest } = registers;
 
-            break;
-          }
+          registers = rest;
+        } else {
+          registers = { ...registers, [reg]: value };
         }
       }
     }
 
-    return search;
+    return registers;
   },
 });
-
-export const enum SearchEffKind {
-  Start,
-  Exit,
-}
-
-export const searchEffect = StateEffect.define<
-  | {
-      type: SearchEffKind.Start;
-      selection: EditorSelection;
-    }
-  | {
-      type: SearchEffKind.Exit;
-      query?: SearchQuery;
-    }
->();
 
 type HistoryEffect =
   | {
       type: "move";
-      offset: 1 | -1;
+      offset: number;
       head?: EditorState;
     }
   | {

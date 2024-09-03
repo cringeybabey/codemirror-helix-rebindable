@@ -64,7 +64,12 @@ export const config: Options.Testrunner = {
       browserName: "chrome",
       "goog:chromeOptions": process.env.CI
         ? {
-            args: ["--headless", "--disable-gpu", "--no-sandbox"],
+            args: [
+              "--headless",
+              "--disable-gpu",
+              "--no-sandbox",
+              "--disable-dev-shm-usage",
+            ],
           }
         : {},
     },

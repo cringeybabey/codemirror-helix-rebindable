@@ -50,9 +50,11 @@ pages:
   script:
     - rm "$NPM_TOKEN"
     - apt update
-    - apt install -y git
+    - apt-get install -y --no-install-recommends git brotli
     - npm ci --cache npm_cache
-    - cd demo && npm exec --no vite -- build --base="./"
+    - cd demo && npm exec --no vite -- build --base="./" && cd ..
+    - find demo/dist -type f -regex '.*\.\(htm\|html\|txt\|text\|js\|css\)$' -exec gzip -f -k {} \;
+    - find demo/dist -type f -regex '.*\.\(htm\|html\|txt\|text\|js\|css\)$' -exec brotli -f -k {} \;
   publish: demo/dist
   artifacts:
     paths:

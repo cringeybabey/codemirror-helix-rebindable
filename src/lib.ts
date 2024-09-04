@@ -58,6 +58,7 @@ import type { SyntaxNode } from "@lezer/common";
 
 import { MinorMode, ModeState, ModeType } from "./entities";
 import {
+  expandSyntaxHistory,
   historyEffect,
   historyField,
   modeEffect,
@@ -65,6 +66,9 @@ import {
   registersField,
   sameMode,
   sameModeState,
+  syntaxHistoryEffect,
+  syntaxHistoryField,
+  undoSyntaxHistory,
   yankEffect,
 } from "./state";
 import {
@@ -850,9 +854,28 @@ const helixCommandBindings: {
       });
     },
     ["Alt-ArrowUp"](view) {
-      return selectParentSyntax(view);
+      expandSyntaxHistory(
+        view.state,
+        (start, dispatch) => {
+          view.dispatch(start);
+
+          selectParentSyntax({
+            state: view.state,
+            dispatch,
+          });
+        },
+        (spec) => view.dispatch(spec)
+      );
     },
     ["Alt-o"]: "Alt-ArrowUp",
+    ["Alt-i"]: "Alt-ArrowDown",
+    ["Alt-ArrowDown"](view) {
+      const result = undoSyntaxHistory(view.state);
+
+      if (result) {
+        view.dispatch(result);
+      }
+    },
     ["Alt-ArrowRight"](view) {
       moveToSibling(view, true);
     },
@@ -911,21 +934,12 @@ const helixCommandBindings: {
         .slice(selection.from, selection.to)
         .toString();
 
+      const yanked = escapeRegex(selected);
       view.dispatch({
-        effects: yankEffect.of(["/", selected]),
+        effects: yankEffect.of(["/", yanked]),
       });
-      // view.dispatch({
-      //   effects: searchEffect.of({
-      //     type: SearchEffKind.Exit,
-      //     query: new SearchQuery({
-      //       search: selected,
-      //       caseSensitive: /[A-Z]/.test(selected),
-      //       regexp: false,
-      //     }),
-      //   }),
-      // });
 
-      getCommandPanel(view).showMessage(`register '/' set to '${selected}'`);
+      getCommandPanel(view).showMessage(`register '/' set to '${yanked}'`);
     },
     ["_"](view) {
       const selection = helixSelection(
@@ -1421,21 +1435,6 @@ class EndLineCursor extends WidgetType {
 const cursorMark = Decoration.mark({ class: "cm-hx-cursor" });
 const endlineCursorWidget = Decoration.widget({ widget: new EndLineCursor() });
 
-// // TODO: should this be a facet?
-// const cursorField = StateField.define<DecorationSet>({
-//   create(state) {
-//     return drawCursorMark(state.selection, state.doc);
-//   },
-
-//   update(_value, tr) {
-//     return drawCursorMark(tr.newSelection, tr.newDoc);
-//   },
-
-//   provide(field) {
-//     return EditorView.decorations.from(field);
-//   },
-// });
-
 function drawCursorMark(selection: EditorSelection, doc: Text) {
   const head = selection.main.head;
   const line = doc.lineAt(head);
@@ -1719,12 +1718,26 @@ export function helix(options: Options = {}): Extension {
     searchFacet.from(registersField, (registers) => registers["/"]?.toString()),
     changeFilter,
     inputHandler,
+    EditorState.transactionFilter.from(syntaxHistoryField, ({ selections }) =>
+      selections.length === 0
+        ? letThrough
+        : (tr) => {
+            for (const effect of tr.effects) {
+              if (effect.is(syntaxHistoryEffect)) {
+                return tr;
+              }
+            }
+
+            return [tr, { effects: syntaxHistoryEffect.of({ type: "reset" }) }];
+          }
+    ),
     EditorView.decorations.compute(["selection", "doc"], (state) => {
       return drawCursorMark(state.selection, state.doc);
     }),
     updateListener,
     showPanel.of(statusPanel),
     showPanel.of(commandPanel),
+    syntaxHistoryField,
     ViewPlugin.define((view) => {
       const cursorShape = options?.config?.["editor.cursor-shape.insert"];
 
@@ -2159,4 +2172,8 @@ function resetScroll(view: EditorView, effect: StateEffect<any>) {
       view.dispatch({ effects: effect });
     })
   );
+}
+
+function escapeRegex(text: string) {
+  return text.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&").replace(/-/g, "\\x2d");
 }

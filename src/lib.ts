@@ -1,12 +1,8 @@
 import {
-  cursorCharLeft,
-  cursorCharRight,
   cursorDocEnd,
   cursorDocStart,
   cursorLineBoundaryRight,
-  cursorLineDown,
   cursorLineStart,
-  cursorLineUp,
   cursorPageDown,
   cursorPageUp,
   deleteCharBackward,
@@ -15,16 +11,12 @@ import {
   indentMore,
   insertNewlineAndIndent,
   selectAll,
-  selectCharLeft,
-  selectCharRight,
   selectDocEnd,
   selectDocStart,
   selectGroupLeft,
   selectGroupRight,
   selectLineBoundaryRight,
-  selectLineDown,
   selectLineStart,
-  selectLineUp,
   selectPageDown,
   selectPageUp,
   selectParentSyntax,
@@ -53,10 +45,15 @@ import {
   showPanel,
 } from "@codemirror/view";
 import { SearchQuery } from "@codemirror/search";
-import { matchBrackets, syntaxTree } from "@codemirror/language";
-import type { SyntaxNode } from "@lezer/common";
 
-import { MinorMode, ModeState, ModeType } from "./entities";
+import {
+  MinorMode,
+  ModeState,
+  ModeType,
+  NonInsertMode,
+  NormalLikeMode,
+} from "./entities";
+
 import {
   expandSyntaxHistory,
   historyEffect,
@@ -77,91 +74,27 @@ import {
   panelStyles,
   statusPanel,
 } from "./panels";
-
-const MODE_EFF = {
-  NORMAL: modeEffect.of({
-    type: ModeType.Normal,
-    minor: MinorMode.Normal,
-  }),
-  NORMAL_GOTO: modeEffect.of({
-    type: ModeType.Normal,
-    minor: MinorMode.Goto,
-  }),
-  NORMAL_MATCH: modeEffect.of({
-    type: ModeType.Normal,
-    minor: MinorMode.Match,
-  }),
-  NORMAL_SPACE: modeEffect.of({
-    type: ModeType.Normal,
-    minor: MinorMode.Space,
-  }),
-  SELECT: modeEffect.of({
-    type: ModeType.Select,
-    minor: MinorMode.Normal,
-  }),
-  SELECT_GOTO: modeEffect.of({
-    type: ModeType.Select,
-    minor: MinorMode.Goto,
-  }),
-  SELECT_MATCH: modeEffect.of({
-    type: ModeType.Select,
-    minor: MinorMode.Match,
-  }),
-  SELECT_SPACE: modeEffect.of({
-    type: ModeType.Select,
-    minor: MinorMode.Space,
-  }),
-  INSERT: modeEffect.of({ type: ModeType.Insert }),
-};
-
-function moveBy(
-  view: EditorView,
-  mode: NonInsertMode,
-  cursor: (view: EditorView) => void,
-  select: (view: EditorView) => void
-) {
-  let count = cmdCount(mode);
-
-  if (mode.type === ModeType.Select) {
-    for (let _i = 0; _i < count; _i++) {
-      select(view);
-    }
-  } else {
-    const selection = view.state.selection.main;
-
-    if (selection.from !== selection.to) {
-      view.dispatch({
-        selection: EditorSelection.cursor(selection.head),
-      });
-    }
-
-    for (let _i = 0; _i < count; _i++) {
-      cursor(view);
-    }
-  }
-
-  if (mode.count) {
-    view.dispatch({
-      effects: resetCount(mode),
-    });
-  }
-}
-
-function moveDown(view: EditorView, mode: NonInsertMode) {
-  moveBy(view, mode, cursorLineDown, selectLineDown);
-}
-
-function moveUp(view: EditorView, mode: NonInsertMode) {
-  moveBy(view, mode, cursorLineUp, selectLineUp);
-}
-
-function moveLeft(view: EditorView, mode: NonInsertMode) {
-  moveBy(view, mode, cursorCharLeft, selectCharLeft);
-}
-
-function moveRight(view: EditorView, mode: NonInsertMode) {
-  moveBy(view, mode, cursorCharRight, selectCharRight);
-}
+import {
+  MODE_EFF,
+  ViewProxy,
+  changeCase,
+  cmdCount,
+  helixSelection,
+  insertLineAndEdit,
+  matchBracket,
+  moveBy,
+  moveDown,
+  moveLeft,
+  moveRight,
+  moveToSibling,
+  moveUp,
+  paste,
+  replaceWithChar,
+  resetCount,
+  setFindMode,
+  surround,
+} from "./commands";
+import { backwardsSearch } from "./search";
 
 function startSearch(view: EditorView, global: boolean) {
   const initialScroll = view.scrollSnapshot();
@@ -202,7 +135,9 @@ function startSearch(view: EditorView, global: boolean) {
         match = query.getCursor(view.state).next();
       }
 
-      if (!match.done) {
+      if (match.done) {
+        reset();
+      } else {
         const selection = EditorSelection.range(
           match.value.from,
           match.value.to
@@ -257,26 +192,10 @@ const searchFacet = Facet.define<string | undefined, SearchQuery | undefined>({
   },
 });
 
-type NonInsertMode = Exclude<
-  ModeState,
-  {
-    type: ModeType.Insert;
-  }
->;
-
-type NormalLikeMode = NonInsertMode & { minor: MinorMode.Normal };
-
 type SimpleCommand<M> = (
   view: EditorView,
   mode: M
 ) => boolean | undefined | void;
-
-type ViewProxy = {
-  dispatch(tr: TransactionSpec): void;
-  dispatch(...tr: TransactionSpec[]): void;
-  original: EditorView;
-  state: EditorState;
-};
 
 type CheckpointCommand<M> = (
   view: ViewProxy,
@@ -757,71 +676,31 @@ const helixCommandBindings: {
           showSearchError(view, query);
         }
 
+        view.dispatch({
+          effects: resetCount(mode),
+        });
+
         return true;
       }
 
-      type Match = { from: number; to: number };
-      const select = (match: Match) => {
+      const result = backwardsSearch(view.state, query, mode, (match) => {
         const selection = EditorSelection.range(match.from, match.to);
+
         view.dispatch({
           selection: selection,
           effects: EditorView.scrollIntoView(selection, { y: "center" }),
         });
-      };
+      });
 
-      const cursor = query.getCursor(view.state);
-      const selection = view.state.selection.main;
-
-      const count = cmdCount(mode);
-      const beforeRing = new Ring<Match>(count);
-
-      const iter = peekable(cloned(cursor));
-      const beforeIter = peekingUntil(
-        iter,
-        (item) => item.to >= selection.from
-      );
-
-      for (const item of {
-        [Symbol.iterator]() {
-          return beforeIter;
-        },
-      }) {
-        beforeRing.push(item);
-      }
-
-      if (beforeRing.length === count) {
-        select(beforeRing.first);
-        return;
-      }
-
-      const afterRing = new Ring<Match>(count - beforeRing.length);
-
-      for (const item of {
-        [Symbol.iterator]() {
-          return iter;
-        },
-      }) {
-        afterRing.push(item);
-      }
-
-      const total = afterRing.length + beforeRing.length;
-
-      if (total === 0) {
+      if (result?.wrapped) {
+        getCommandPanel(view).showMessage("Wrapped around document");
+      } else if (result?.match === false) {
         getCommandPanel(view).showError("No more matches");
-        return;
       }
 
-      getCommandPanel(view).showMessage("Wrapped around document");
-
-      if (total === count) {
-        select(afterRing.first);
-        return;
-      }
-
-      const all = [...beforeRing, ...afterRing];
-      const rem = count % total;
-
-      select(all[all.length - rem - 1]);
+      view.dispatch({
+        effects: resetCount(mode),
+      });
     },
     ["Ctrl-d"](view, mode) {
       moveBy(view, mode, cursorPageDown, selectPageDown);
@@ -1174,144 +1053,6 @@ const helixCommandBindings: {
   },
 };
 
-function paste(
-  view: ViewProxy,
-  yanked: string | Text | undefined,
-  before: boolean,
-  count: number,
-  reset = true
-) {
-  const range = view.state.selection.main;
-
-  yanked ??= "";
-
-  const spec = { from: range.to, insert: yanked.toString().repeat(count) };
-
-  const change = view.state.changes(spec);
-
-  view.dispatch(
-    { changes: change },
-    {
-      selection: before
-        ? { anchor: range.to, head: range.to + yanked.length }
-        : { anchor: range.from, head: range.from + yanked.length },
-      sequential: true,
-    },
-    reset ? { effects: MODE_EFF.NORMAL } : {}
-  );
-}
-
-function setFindMode(
-  view: EditorView,
-  status: string,
-  mode: NormalLikeMode,
-  metadata: { inclusive: boolean; reverse: boolean }
-) {
-  const effect = modeEffect.of({
-    type: mode.type,
-    minor: MinorMode.Normal,
-    count: mode.count,
-    expecting: {
-      minor: status,
-      callback: findText,
-      metadata,
-    },
-  });
-
-  view.dispatch({ effects: effect });
-}
-
-// TODO: fix selection ranges
-function helixSelection(range: SelectionRange, doc: Text) {
-  const to = Math.min(range.to + 1, doc.length);
-
-  const forward = range.head >= range.anchor;
-
-  const anchor = forward ? range.anchor : to;
-  const head = forward ? to : range.head;
-
-  return EditorSelection.range(anchor, head);
-}
-
-// function codemirrorSelection(range: SelectionRange) {
-//   if (range.from === range.to) {
-//     return range;
-//   }
-
-//   const forward = range.from === range.anchor;
-
-//   return forward
-//     ? EditorSelection.range(range.anchor, range.head - 1)
-//     : EditorSelection.range(range.anchor - 1, range.head);
-// }
-
-function moveToSibling(view: EditorView, forward: boolean) {
-  const tree = syntaxTree(view.state);
-
-  const selection = view.state.selection.main;
-  let stack = tree.resolveStack(selection.from, 1);
-
-  let sibling: SyntaxNode | null = null;
-
-  while (true) {
-    const node = stack.node;
-
-    if (node && node.from <= selection.from && node.to >= selection.to) {
-      sibling = forward ? node?.nextSibling : node?.prevSibling;
-
-      if (sibling) {
-        break;
-      }
-    }
-
-    if (stack.next) {
-      stack = stack.next;
-    } else {
-      break;
-    }
-  }
-
-  if (!sibling) {
-    view.dispatch({
-      selection: EditorSelection.range(0, view.state.doc.length),
-      scrollIntoView: true,
-    });
-
-    return;
-  }
-
-  view.dispatch({
-    selection: EditorSelection.range(sibling.from, sibling.to),
-    scrollIntoView: true,
-  });
-}
-
-function insertLineAndEdit(view: ViewProxy, below: boolean) {
-  let from: number;
-  let cursor: number;
-
-  if (below) {
-    const line = view.state.doc.lineAt(view.state.selection.main.to);
-
-    from = line.to;
-    cursor = from + 1;
-  } else {
-    const line = view.state.doc.lineAt(view.state.selection.main.from);
-
-    from = line.from;
-    cursor = from;
-  }
-
-  view.dispatch({
-    changes: {
-      from,
-      insert: "\n",
-    },
-    selection: EditorSelection.cursor(cursor),
-    effects: MODE_EFF.INSERT,
-  });
-}
-
 function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
   const allKeys = [
     ...new Set(
@@ -1454,33 +1195,37 @@ function letThrough(tr: Transaction) {
   return tr;
 }
 
-const changeFilter = EditorState.transactionFilter.from(modeField, (mode) =>
-  mode.type === ModeType.Insert
-    ? letThrough
-    : (tr) => {
-        const userEvent = tr.annotation(Transaction.userEvent);
+const unhandledCommandsFilter = EditorState.transactionFilter.from(
+  modeField,
+  (mode) =>
+    mode.type === ModeType.Insert
+      ? letThrough
+      : (tr) => {
+          const userEvent = tr.annotation(Transaction.userEvent);
 
-        if (userEvent == null) {
-          return tr;
+          if (userEvent == null) {
+            return tr;
+          }
+
+          if (!userEvent.startsWith("input")) {
+            return tr;
+          }
+
+          if (!userEvent.startsWith("input.type")) {
+            return tr;
+          }
+
+          if (mode.minor !== MinorMode.Normal) {
+            return {
+              effects:
+                mode.type === ModeType.Normal
+                  ? MODE_EFF.NORMAL
+                  : MODE_EFF.SELECT,
+            };
+          }
+
+          return [];
         }
-
-        if (!userEvent.startsWith("input")) {
-          return tr;
-        }
-
-        if (!userEvent.startsWith("input.type")) {
-          return tr;
-        }
-
-        if (mode.minor !== MinorMode.Normal) {
-          return {
-            effects:
-              mode.type === ModeType.Normal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
-          };
-        }
-
-        return [];
-      }
 );
 
 // TODO: this trick doesn't work with compositing. We have to
@@ -1708,6 +1453,7 @@ export function helix(options: Options = {}): Extension {
     panelStyles,
     drawSelection({
       cursorBlinkRate: 0,
+      drawRangeCursor: false,
     }),
     helixKeymap,
     modeField,
@@ -1716,7 +1462,7 @@ export function helix(options: Options = {}): Extension {
       ? registersField.init(() => initialRegisters)
       : registersField,
     searchFacet.from(registersField, (registers) => registers["/"]?.toString()),
-    changeFilter,
+    unhandledCommandsFilter,
     inputHandler,
     EditorState.transactionFilter.from(syntaxHistoryField, ({ selections }) =>
       selections.length === 0
@@ -1860,137 +1606,6 @@ function toExternalMode(mode: ModeState) {
   }
 }
 
-function findText(
-  view: EditorView,
-  text: string,
-  {
-    inclusive,
-    reverse,
-  }: {
-    inclusive: boolean;
-    reverse: boolean;
-  }
-) {
-  const mode = view.state.field(modeField);
-  const count = mode.type === ModeType.Insert ? 1 : cmdCount(mode);
-  const select = mode.type === ModeType.Select;
-  const selection = view.state.selection.main;
-
-  const start = selection.head;
-
-  const doc = view.state.doc.toString();
-
-  let rawIndex = start;
-
-  for (let _i = 0; _i < count; _i++) {
-    if (reverse && rawIndex === 0) {
-      rawIndex = -1;
-      break;
-    }
-
-    rawIndex = reverse
-      ? doc.lastIndexOf(text, rawIndex - 1)
-      : doc.indexOf(text, rawIndex + 1);
-
-    if (rawIndex < 0) {
-      break;
-    }
-  }
-
-  const resetEffect = select ? MODE_EFF.SELECT : MODE_EFF.NORMAL;
-
-  if (rawIndex === -1) {
-    view.dispatch({
-      effects: resetEffect,
-    });
-
-    return;
-  }
-
-  const index = inclusive ? rawIndex : reverse ? rawIndex + 1 : rawIndex - 1;
-
-  const newSelection = select
-    ? EditorSelection.range(selection.anchor, index)
-    : EditorSelection.range(selection.head, index);
-
-  view.dispatch({
-    effects: resetEffect,
-    selection: newSelection,
-  });
-}
-
-const PAIRS: Record<string, [string, string, boolean]> = {
-  "(": ["(", ")", true],
-  ")": ["(", ")", false],
-  "{": ["{", "}", true],
-  "}": ["{", "}", false],
-  "[": ["[", "]", true],
-  "]": ["[", "]", false],
-  "<": ["<", ">", true],
-  ">": ["<", ">", false],
-};
-
-const MATCHEABLE = new Set([...Object.keys(PAIRS), `"`, "'"]);
-
-function matchBracket(view: EditorView) {
-  const selection = view.state.selection.main;
-
-  const char = view.state.doc
-    .slice(selection.head, selection.head + 1)
-    .toString();
-
-  if (!MATCHEABLE.has(char)) {
-    // TODO: find surrounding pair
-
-    return null;
-  }
-
-  const open = PAIRS[char]?.[2] ?? false;
-  const match = matchBrackets(
-    view.state,
-    selection.head + (open ? 0 : 1),
-    open ? 1 : -1
-  );
-
-  if (match) {
-    return match.end;
-  }
-}
-
-function surround(view: EditorView, char: string, proxy: ViewProxy) {
-  const pair = PAIRS[char];
-
-  const selection = view.state.selection.main;
-  const range = helixSelection(selection, view.state.doc);
-
-  const open = pair?.[0] ?? char;
-  const close = pair?.[1] ?? char;
-
-  view.dispatch({
-    changes: [
-      {
-        from: range.from,
-        insert: open,
-      },
-      {
-        from: range.to,
-        insert: close,
-      },
-    ],
-    effects: MODE_EFF.NORMAL,
-  });
-
-  const newSelection = proxy.original.state.selection.main;
-  const offset = newSelection.anchor === newSelection.from ? 1 : -1;
-
-  const anchor = newSelection.anchor - offset;
-  const head = newSelection.head + offset;
-
-  proxy.original.dispatch({
-    selection: EditorSelection.range(anchor, head),
-  });
-}
-
 function commitToHistory(view: EditorView, temp = false) {
   return {
     effects: historyEffect.of({
@@ -1999,49 +1614,6 @@ function commitToHistory(view: EditorView, temp = false) {
       temp,
     }),
   };
-}
-
-function changeCase(view: ViewProxy, upper?: boolean) {
-  const selection = view.state.selection.main;
-  const selected = view.state.doc.slice(selection.from, selection.to);
-
-  let insert;
-
-  if (upper == null) {
-    insert = [...selected.toString()]
-      .map((char) => {
-        let next = char.toUpperCase();
-
-        return next === char ? char.toLowerCase() : next;
-      })
-      .join("");
-  } else if (upper) {
-    insert = selected.toString().toUpperCase();
-  } else {
-    insert = selected.toString().toLowerCase();
-  }
-
-  view.dispatch({
-    changes: {
-      from: selection.from,
-      to: selection.to,
-      insert,
-    },
-  });
-}
-
-function replaceWithChar(view: EditorView, char: string, viewProxy: ViewProxy) {
-  const selection = view.state.selection.main;
-  const selected = view.state.doc.slice(selection.from, selection.to);
-
-  viewProxy.dispatch({
-    changes: {
-      from: selection.from,
-      to: selection.to,
-      insert: selected.toString().replace(/[^\n]/g, char),
-    },
-    effects: MODE_EFF.NORMAL,
-  });
 }
 
 function showSearchError(view: EditorView, query: SearchQuery) {
@@ -2056,114 +1628,6 @@ function showSearchError(view: EditorView, query: SearchQuery) {
   getCommandPanel(view).showError(
     `Invalid regex /${query.search}/: ${message}`
   );
-}
-
-function cmdCount(mode: NonInsertMode) {
-  return mode.count ?? 1;
-}
-
-function resetCount(mode: NonInsertMode) {
-  const { count: _count, ...rest } = mode;
-
-  return modeEffect.of(rest);
-}
-
-class Ring<T> {
-  items: T[];
-  head: number;
-  length: number;
-  maxLength: number;
-
-  constructor(length: number) {
-    this.items = Array.from({ length });
-    this.maxLength = length;
-    this.head = 0;
-    this.length = 0;
-  }
-
-  get first() {
-    return this.items[this.start];
-  }
-
-  push(item: T) {
-    this.items[this.head] = item;
-    this.head += 1;
-    this.length += 1;
-
-    this.head %= this.maxLength;
-    this.length = Math.min(this.maxLength, this.length);
-  }
-
-  merge(other: Ring<T>) {
-    for (let i = 0; i < other.length; i++) {
-      const item = other.items[(other.start + i) % other.maxLength];
-      this.push(item);
-    }
-  }
-
-  *[Symbol.iterator]() {
-    for (let i = 0; i < this.length; i++) {
-      yield this.items[(this.start + i) % this.maxLength];
-    }
-  }
-
-  private get start() {
-    if (this.length < this.maxLength) {
-      return 0;
-    } else {
-      return (this.head + 1) % this.maxLength;
-    }
-  }
-}
-
-function peekingUntil<T, R, N>(
-  iter: ReturnType<typeof peekable<T, R, N>>,
-  check: (next: T) => boolean
-) {
-  return {
-    next() {
-      const item = iter.peek();
-
-      if (item.done) {
-        return item;
-      }
-
-      if (check(item.value)) {
-        return { value: undefined, done: true as const };
-      }
-
-      return iter.next();
-    },
-  };
-}
-
-function peekable<T, R, N>(iter: Iterator<T, R, N>) {
-  let next = iter.next();
-
-  const peekIter = {
-    next() {
-      const item = next;
-
-      if (!item.done) {
-        next = iter.next();
-      }
-
-      return item;
-    },
-    peek() {
-      return next;
-    },
-  };
-
-  return peekIter;
-}
-
-function cloned<T, R, N>(iter: Iterator<T, R, N>) {
-  return {
-    next() {
-      return { ...iter.next() };
-    },
-  };
 }
 
 function resetScroll(view: EditorView, effect: StateEffect<any>) {

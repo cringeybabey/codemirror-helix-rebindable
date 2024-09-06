@@ -27,3 +27,12 @@ export type ModeState =
         metadata: any;
       };
     };
+
+export type NonInsertMode = Exclude<
+  ModeState,
+  {
+    type: ModeType.Insert;
+  }
+>;
+
+export type NormalLikeMode = NonInsertMode & { minor: MinorMode.Normal };

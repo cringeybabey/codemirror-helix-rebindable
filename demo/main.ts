@@ -96,16 +96,24 @@ const state = {
     import("folder:.."),
   ]);
 
-  const picker = createPicker(undefined, async (file) => {
+  if (process.env.NODE_ENV === "development") {
+    main("src/lib.ts");
+  } else {
+    const picker = createPicker(undefined, async (file) => {
+      await main(file);
+    });
+
+    picker.initOptions(filePickerOptions);
+  }
+
+  async function main(file: string) {
     await loaded;
     const view = await createViewPanel(file);
     (window as any).view = view;
 
     view.focus();
     debugEl.style.display = "";
-  });
-
-  picker.initOptions(filePickerOptions);
+  }
 }
 
 async function createViewPanel(file: string) {

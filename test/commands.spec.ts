@@ -10,10 +10,23 @@ type Assertion =
 const slow = false;
 
 const cases: Array<[string, string | string[], string[], Assertion]> = [
+  ["moves to line end", ["foo", "bar"], ["g", "l"], { selection: [3, 2] }],
+  [
+    "moves to line end, back from linebreak",
+    ["foo", "bar"],
+    ["g", "l", "l", "g", "l"],
+    { selection: [3, 2] },
+  ],
   ["deletes a line", ["foo", "bar"], ["x", "d"], "bar"],
-  ["selects lines", ["foo", "bar", "baz"], ["x", "x"], { selection: [0, 7] }],
+  ["selects lines", ["foo", "bar", "baz"], ["x", "x"], { selection: [0, 8] }],
   ["reverse selection", "foo", ["x", "Alt-;"], { selection: [3, 0] }],
   ["surrounds with parens", "foo", ["x", "m", "s", "<"], "<foo>"],
+  [
+    "selects a line on linebreak",
+    ["foo", "bar"],
+    ["g", "l", "l", "x"],
+    { selection: [0, 4] },
+  ],
   [
     "surrounds moves selection",
     "foo",
@@ -27,24 +40,24 @@ const cases: Array<[string, string | string[], string[], Assertion]> = [
     "<foo>",
   ],
   ["cancels surrounds", "foo", ["x", "m", "s", "Escape", "a", "i"], "fooi"],
-  ["find characters", "hello world", ["f", "w"], { selection: [0, 6] }],
+  ["find characters", "hello world", ["f", "w"], { selection: [0, 7] }],
   [
     "find characters, repeat",
     "hello world",
     ["f", "o", "f", "o"],
-    { selection: [4, 7] },
+    { selection: [4, 8] },
   ],
   [
     "find characters, turn around",
     "hello world",
     ["f", "w", "F", "e"],
-    { selection: [6, 1] },
+    { selection: [7, 1] },
   ],
   [
     "find characters, select & repeat",
     "hello world hello world",
     ["v", "f", "o", "f", "o", "f", "e", "F", "d"],
-    { selection: [0, 10] },
+    { selection: [0, 11] },
   ],
   [
     "search cancellation",

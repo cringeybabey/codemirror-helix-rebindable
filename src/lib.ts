@@ -1,10 +1,6 @@
 import {
   cursorDocEnd,
   cursorDocStart,
-  cursorLineBoundaryRight,
-  cursorLineStart,
-  cursorPageDown,
-  cursorPageUp,
   deleteCharBackward,
   deleteCharForward,
   indentLess,
@@ -15,10 +11,6 @@ import {
   selectDocStart,
   selectGroupLeft,
   selectGroupRight,
-  selectLineBoundaryRight,
-  selectLineStart,
-  selectPageDown,
-  selectPageUp,
   selectParentSyntax,
   toggleComment,
 } from "@codemirror/commands";
@@ -77,12 +69,16 @@ import {
 import {
   MODE_EFF,
   ViewProxy,
+  atomicRange,
   changeCase,
+  cmSelToInternal,
   cmdCount,
-  helixSelection,
+  cursorToLineEnd,
+  cursorToLineStart,
   insertLineAndEdit,
+  internalSelToCM,
   matchBracket,
-  moveBy,
+  moveByHalfPage,
   moveDown,
   moveLeft,
   moveRight,
@@ -93,6 +89,7 @@ import {
   resetCount,
   setFindMode,
   surround,
+  withHelixSelection,
 } from "./commands";
 import { backwardsSearch } from "./search";
 
@@ -227,11 +224,18 @@ const helixCommandBindings: {
       insertNewlineAndIndent(view);
     },
     Escape(view) {
+      let selection = view.state.selection.main;
+
+      if (selection.empty) {
+        selection = internalSelToCM(selection, view.state.doc);
+      }
+
       view.dispatch({
         effects: [
           MODE_EFF.NORMAL,
           historyEffect.of({ type: "commit", state: view.state }),
         ],
+        selection,
       });
     },
   },
@@ -283,12 +287,11 @@ const helixCommandBindings: {
     },
     ["y"](view) {
       const selection = view.state.selection.main;
-      const range = helixSelection(selection, view.state.doc);
 
       view.dispatch({
         effects: yankEffect.of([
           `"`,
-          view.state.doc.slice(range.from, range.to),
+          view.state.doc.slice(selection.from, selection.to),
         ]),
       });
 
@@ -334,16 +337,18 @@ const helixCommandBindings: {
       checkpoint: "temp",
       command(view) {
         const selection = view.state.selection.main;
-        const range = helixSelection(selection, view.state.doc);
 
         view.dispatch({
           effects: [
-            yankEffect.of([`"`, view.state.doc.slice(range.from, range.to)]),
+            yankEffect.of([
+              `"`,
+              view.state.doc.slice(selection.from, selection.to),
+            ]),
             MODE_EFF.INSERT,
           ],
           changes: {
-            from: range.from,
-            to: range.to,
+            from: selection.from,
+            to: selection.to,
             insert: "",
           },
         });
@@ -354,16 +359,17 @@ const helixCommandBindings: {
       command(view) {
         const selection = view.state.selection.main;
 
-        const range = helixSelection(selection, view.state.doc);
-
         view.dispatch({
           effects: [
-            yankEffect.of([`"`, view.state.doc.slice(range.from, range.to)]),
+            yankEffect.of([
+              `"`,
+              view.state.doc.slice(selection.from, selection.to),
+            ]),
             MODE_EFF.NORMAL,
           ],
           changes: {
-            from: range.from,
-            to: range.to,
+            from: selection.from,
+            to: selection.to,
           },
         });
       },
@@ -507,25 +513,25 @@ const helixCommandBindings: {
     ["f"](view, mode) {
       setFindMode(view, "f", mode, {
         inclusive: true,
-        reverse: false,
+        forward: true,
       });
     },
     ["F"](view, mode) {
       setFindMode(view, "F", mode, {
         inclusive: true,
-        reverse: true,
+        forward: false,
       });
     },
     ["t"](view, mode) {
       setFindMode(view, "t", mode, {
         inclusive: false,
-        reverse: false,
+        forward: true,
       });
     },
     ["T"](view, mode) {
       setFindMode(view, "T", mode, {
         inclusive: false,
-        reverse: true,
+        forward: false,
       });
     },
     ["u"](view, mode) {
@@ -588,13 +594,20 @@ const helixCommandBindings: {
     ["x"](view, mode) {
       const initial = view.state.selection.main;
 
-      const anchorLine = view.state.doc.lineAt(initial.anchor);
-      const headLine = view.state.doc.lineAt(initial.head);
-      const [startLine, endLine] =
-        anchorLine.number < headLine.number
-          ? [anchorLine, headLine]
-          : [headLine, anchorLine];
-      const ideal = EditorSelection.range(startLine.from, endLine.to);
+      const startLine = view.state.doc.lineAt(initial.from);
+      let endLine = view.state.doc.lineAt(initial.to);
+
+      if (!initial.empty && initial.to === endLine.from) {
+        endLine = view.state.doc.line(endLine.number - 1);
+      }
+
+      const ideal = EditorSelection.range(
+        startLine.from,
+        Math.min(
+          view.state.doc.length,
+          endLine.to + view.state.lineBreak.length
+        )
+      );
 
       let nextSel: SelectionRange;
 
@@ -607,7 +620,13 @@ const helixCommandBindings: {
           view.state.doc.lines
         );
         const nextLine = view.state.doc.line(nextLineNumber);
-        nextSel = EditorSelection.range(startLine.from, nextLine.to);
+        nextSel = EditorSelection.range(
+          startLine.from,
+          Math.min(
+            view.state.doc.length,
+            nextLine.to + view.state.lineBreak.length
+          )
+        );
       } else {
         nextSel = ideal;
       }
@@ -703,22 +722,33 @@ const helixCommandBindings: {
       });
     },
     ["Ctrl-d"](view, mode) {
-      moveBy(view, mode, cursorPageDown, selectPageDown);
+      moveByHalfPage(view, mode, true);
     },
     ["PageDown"]: "Ctrl-d",
     ["PageUp"]: "Ctrl-u",
     ["Ctrl-u"](view, mode) {
-      moveBy(view, mode, cursorPageUp, selectPageUp);
+      moveByHalfPage(view, mode, false);
     },
     [";"](view) {
-      const selection = view.state.selection.main;
+      withHelixSelection(view, () => {
+        if (view.state.selection.main.empty) {
+          return false;
+        }
 
-      view.dispatch({
-        selection: EditorSelection.cursor(selection.head),
+        view.dispatch({
+          selection: EditorSelection.cursor(view.state.selection.main.head),
+          scrollIntoView: true,
+        });
+
+        return true;
       });
     },
     ["Alt-;"](view) {
       const selection = view.state.selection.main;
+
+      if (atomicRange(selection, view.state.doc)) {
+        return;
+      }
 
       view.dispatch({
         selection: EditorSelection.range(selection.head, selection.anchor),
@@ -727,6 +757,10 @@ const helixCommandBindings: {
     },
     ["Alt-:"](view) {
       const selection = view.state.selection.main;
+
+      if (atomicRange(selection, view.state.doc)) {
+        return;
+      }
 
       view.dispatch({
         selection: EditorSelection.range(selection.from, selection.to),
@@ -804,10 +838,7 @@ const helixCommandBindings: {
       },
     },
     ["*"](view) {
-      const selection = helixSelection(
-        view.state.selection.main,
-        view.state.doc
-      );
+      const selection = view.state.selection.main;
 
       const selected = view.state.doc
         .slice(selection.from, selection.to)
@@ -821,13 +852,12 @@ const helixCommandBindings: {
       getCommandPanel(view).showMessage(`register '/' set to '${yanked}'`);
     },
     ["_"](view) {
-      const selection = helixSelection(
-        view.state.selection.main,
-        view.state.doc
-      );
+      const selection = view.state.selection.main;
+
       const selected = view.state.doc
         .slice(selection.from, selection.to)
         .toString();
+
       const trimmed = selected.trim();
 
       if (trimmed === selected) {
@@ -850,12 +880,16 @@ const helixCommandBindings: {
         selection: EditorSelection.range(anchor, head),
       });
     },
+    ["Home"]: cursorToLineStart,
+    ["End"]: cursorToLineEnd,
   },
   goto: {
     ["g"](view, mode) {
       const isNormal = mode.type === ModeType.Normal;
 
-      isNormal ? cursorDocStart(view) : selectDocStart(view);
+      withHelixSelection(view, () =>
+        isNormal ? cursorDocStart(view) : selectDocStart(view)
+      );
 
       view.dispatch({
         effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
@@ -864,21 +898,15 @@ const helixCommandBindings: {
     ["e"](view, mode) {
       const isNormal = mode.type === ModeType.Normal;
 
-      isNormal ? cursorDocEnd(view) : selectDocEnd(view);
+      withHelixSelection(view, () =>
+        isNormal ? cursorDocEnd(view) : selectDocEnd(view)
+      );
 
       view.dispatch({
         effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
       });
     },
-    ["h"](view, mode) {
-      const isNormal = mode.type === ModeType.Normal;
-
-      isNormal ? cursorLineStart(view) : selectLineStart(view);
-
-      view.dispatch({
-        effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
-      });
-    },
+    ["h"]: cursorToLineStart,
     ["j"](view, mode) {
       const isNormal = mode.type === ModeType.Normal;
 
@@ -897,15 +925,7 @@ const helixCommandBindings: {
         effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
       });
     },
-    ["l"](view, mode) {
-      const isNormal = mode.type === ModeType.Normal;
-
-      isNormal ? cursorLineBoundaryRight(view) : selectLineBoundaryRight(view);
-
-      view.dispatch({
-        effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
-      });
-    },
+    ["l"]: cursorToLineEnd,
     ["n"](view, mode) {
       const externalCommandDefs = view.state.facet(externalCommandsFacet);
 
@@ -971,10 +991,9 @@ const helixCommandBindings: {
   space: {
     ["y"](view) {
       const selection = view.state.selection.main;
-      const range = helixSelection(selection, view.state.doc);
 
       navigator.clipboard.writeText(
-        view.state.doc.slice(range.from, range.to).toString()
+        view.state.doc.slice(selection.from, selection.to).toString()
       );
 
       getCommandPanel(view).showMessage("yanked 1 selection to register +");
@@ -1174,26 +1193,57 @@ class EndLineCursor extends WidgetType {
 }
 
 const cursorMark = Decoration.mark({ class: "cm-hx-cursor" });
-const endlineCursorWidget = Decoration.widget({ widget: new EndLineCursor() });
+const endlineCursorWidget = Decoration.widget({
+  widget: new EndLineCursor(),
+  side: 1,
+});
 
 function drawCursorMark(selection: EditorSelection, doc: Text) {
-  const head = selection.main.head;
-  const line = doc.lineAt(head);
+  const headSel = internalSelToCM(
+    EditorSelection.cursor(cmSelToInternal(selection.main, doc).head),
+    doc
+  );
+  const line = doc.lineAt(headSel.head);
 
-  if (line.to === head) {
+  if (headSel.from === doc.length || line.to === headSel.from) {
     return Decoration.set(
-      endlineCursorWidget.range(selection.main.head, selection.main.head)
+      endlineCursorWidget.range(headSel.from, headSel.from)
     );
   } else {
-    return Decoration.set(
-      cursorMark.range(selection.main.head, selection.main.head + 1)
-    );
+    return Decoration.set(cursorMark.range(headSel.head, headSel.anchor));
   }
 }
 
 function letThrough(tr: Transaction) {
   return tr;
 }
+
+const selectByClickFilter = EditorState.transactionFilter.from(
+  modeField,
+  (mode) =>
+    mode.type === ModeType.Insert
+      ? letThrough
+      : (tr) => {
+          const userEvent = tr.annotation(Transaction.userEvent);
+
+          if (userEvent !== "select.pointer") {
+            return tr;
+          }
+
+          const selection = tr.newSelection.main;
+
+          if (!selection.empty) {
+            return tr;
+          }
+
+          return [
+            tr,
+            {
+              selection: internalSelToCM(selection, tr.newDoc),
+            },
+          ];
+        }
+);
 
 const unhandledCommandsFilter = EditorState.transactionFilter.from(
   modeField,
@@ -1423,13 +1473,17 @@ export interface Config {
  * It provides Helix-like keybindings, plus two panels to emulate the statusline and the commandline.
  */
 export function helix(options: Options = {}): Extension {
+  const cursorShape = options?.config?.["editor.cursor-shape.insert"] ?? "block";
+
   const registerState = options.globalInit ?? options.init;
+
   const initialRegisters =
     registerState instanceof EditorState
       ? registerState.field(registersField)
       : registerState
       ? (registerState as any).registers
       : undefined;
+
   const initialHistory =
     options.init instanceof EditorState
       ? options.init.field(historyField)
@@ -1440,14 +1494,10 @@ export function helix(options: Options = {}): Extension {
   return [
     EditorView.theme({
       ".cm-hx-block-cursor .cm-cursor": {
-        display: "none !important",
+        display: "none !important"
       },
       ".cm-hx-block-cursor .cm-hx-cursor": {
         background: "#ccc",
-      },
-      // WARNING: flaky
-      ".cm-searchMatch": {
-        background: "initial",
       },
     }),
     panelStyles,
@@ -1463,6 +1513,7 @@ export function helix(options: Options = {}): Extension {
       : registersField,
     searchFacet.from(registersField, (registers) => registers["/"]?.toString()),
     unhandledCommandsFilter,
+    selectByClickFilter,
     inputHandler,
     EditorState.transactionFilter.from(syntaxHistoryField, ({ selections }) =>
       selections.length === 0
@@ -1477,7 +1528,11 @@ export function helix(options: Options = {}): Extension {
             return [tr, { effects: syntaxHistoryEffect.of({ type: "reset" }) }];
           }
     ),
-    EditorView.decorations.compute(["selection", "doc"], (state) => {
+    EditorView.decorations.compute(["selection", "doc", modeField], (state) => {
+      if (cursorShape === "bar" && state.field(modeField).type === ModeType.Insert) {
+        return Decoration.set([]);
+      }
+
       return drawCursorMark(state.selection, state.doc);
     }),
     updateListener,
@@ -1485,9 +1540,15 @@ export function helix(options: Options = {}): Extension {
     showPanel.of(commandPanel),
     syntaxHistoryField,
     ViewPlugin.define((view) => {
-      const cursorShape = options?.config?.["editor.cursor-shape.insert"];
-
       view.scrollDOM.classList.add("cm-hx-block-cursor");
+
+      if (view.state.doc.length !== 0) {
+        setTimeout(() => {
+          view.dispatch({
+            selection: EditorSelection.range(1, 0),
+          });
+        });
+      }
 
       return {
         update(update) {
@@ -1510,11 +1571,7 @@ export function helix(options: Options = {}): Extension {
           }
 
           if (modeChanged && cursorShape === "bar") {
-            if (mode.type === ModeType.Insert) {
-              view.scrollDOM.classList.remove("cm-hx-block-cursor");
-            } else {
-              view.scrollDOM.classList.add("cm-hx-block-cursor");
-            }
+            view.scrollDOM.classList.toggle("cm-hx-block-cursor", mode.type !== ModeType.Insert);
           }
         },
       };
@@ -1550,10 +1607,9 @@ export function helix(options: Options = {}): Extension {
         help: "Yank main selection into system clipboard",
         handler(view) {
           const selection = view.state.selection.main;
-          const range = helixSelection(selection, view.state.doc);
 
           navigator.clipboard.writeText(
-            view.state.doc.slice(range.from, range.to).toString()
+            view.state.doc.slice(selection.from, selection.to).toString()
           );
 
           return { message: "Yanked main selection to + register" };

@@ -14,7 +14,6 @@ workflow:
 build-lib:
   stage: build
   script:
-    - rm "$NPM_TOKEN"
     - npm ci --cache npm_cache
     - npm run build
   artifacts:
@@ -25,10 +24,10 @@ run-tests:
   stage: test
   rules:
     - if: '$CI_COMMIT_BRANCH != "release"'
-  script:
-    - rm "$NPM_TOKEN"
+  before_script:
     - apt update
     - apt install -y libgtk-3-0 libasound2 libx11-xcb-dev libnss3 libgbm-dev libdrm2
+  script:
     - npm ci --cache npm_cache
     - npm test
 
@@ -37,7 +36,6 @@ lint:
   rules:
     - if: '$CI_COMMIT_BRANCH != "release"'
   script:
-    - rm "$NPM_TOKEN"
     - npm ci --cache npm_cache
     - npm exec --no prettier -- --check .
 
@@ -47,10 +45,10 @@ pages:
     - run-tests
   rules:
     - if: '$CI_COMMIT_BRANCH != "release"'
-  script:
-    - rm "$NPM_TOKEN"
+  before_script:
     - apt update
     - apt-get install -y --no-install-recommends git brotli
+  script:
     - npm ci --cache npm_cache
     - cd demo && npm exec --no vite -- build --base="./" && cd ..
     - find demo/dist -type f -regex '.*\.\(htm\|html\|txt\|text\|js\|css\)$' -exec gzip -f -k {} \;
@@ -65,6 +63,7 @@ publish:
   id_tokens:
     SIGSTORE_ID_TOKEN:
       aud: sigstore
+  environment: "npm registry"
   rules:
     - if: '$CI_COMMIT_BRANCH == "release"'
   script:

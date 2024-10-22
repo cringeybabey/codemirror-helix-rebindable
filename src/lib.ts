@@ -1473,7 +1473,8 @@ export interface Config {
  * It provides Helix-like keybindings, plus two panels to emulate the statusline and the commandline.
  */
 export function helix(options: Options = {}): Extension {
-  const cursorShape = options?.config?.["editor.cursor-shape.insert"] ?? "block";
+  const cursorShape =
+    options?.config?.["editor.cursor-shape.insert"] ?? "block";
 
   const registerState = options.globalInit ?? options.init;
 
@@ -1494,7 +1495,7 @@ export function helix(options: Options = {}): Extension {
   return [
     EditorView.theme({
       ".cm-hx-block-cursor .cm-cursor": {
-        display: "none !important"
+        display: "none !important",
       },
       ".cm-hx-block-cursor .cm-hx-cursor": {
         background: "#ccc",
@@ -1529,7 +1530,10 @@ export function helix(options: Options = {}): Extension {
           }
     ),
     EditorView.decorations.compute(["selection", "doc", modeField], (state) => {
-      if (cursorShape === "bar" && state.field(modeField).type === ModeType.Insert) {
+      if (
+        cursorShape === "bar" &&
+        state.field(modeField).type === ModeType.Insert
+      ) {
         return Decoration.set([]);
       }
 
@@ -1571,7 +1575,10 @@ export function helix(options: Options = {}): Extension {
           }
 
           if (modeChanged && cursorShape === "bar") {
-            view.scrollDOM.classList.toggle("cm-hx-block-cursor", mode.type !== ModeType.Insert);
+            view.scrollDOM.classList.toggle(
+              "cm-hx-block-cursor",
+              mode.type !== ModeType.Insert
+            );
           }
         },
       };

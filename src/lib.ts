@@ -1,4 +1,6 @@
 import {
+  cursorCharLeft,
+  cursorCharRight,
   cursorDocEnd,
   cursorDocStart,
   deleteCharBackward,
@@ -223,6 +225,10 @@ const helixCommandBindings: {
     Enter(view) {
       insertNewlineAndIndent(view);
     },
+    // we need these two due to https://github.com/codemirror/dev/issues/634
+    // FIXME: stuff like Shift-<arrow> doesn't quite work with `editor.cursor-shape.insert === "block"`.
+    ArrowLeft: cursorCharLeft,
+    ArrowRight: cursorCharRight,
     Escape(view) {
       let selection = view.state.selection.main;
 
@@ -1504,7 +1510,7 @@ export function helix(options: Options = {}): Extension {
     panelStyles,
     drawSelection({
       cursorBlinkRate: 0,
-      drawRangeCursor: false,
+      drawRangeCursor: cursorShape === "bar",
     }),
     helixKeymap,
     modeField,

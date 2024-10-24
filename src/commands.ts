@@ -703,6 +703,7 @@ export function atomicRange(range: SelectionRange, doc: Text) {
 
   if (len <= 1) {
     return true;
+    // FIXME: this is not quite correct, it is not aligned with `findClusterBreak()`
   } else if (len === 2) {
     const charCode = doc.sliceString(range.from, range.to).charCodeAt(0);
 

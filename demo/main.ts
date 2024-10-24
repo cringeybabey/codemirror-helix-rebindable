@@ -15,12 +15,6 @@ window.customElements.define("hx-debug", Debug);
 
 let codemirror: typeof import("./codemirror");
 
-{
-  document.querySelector(
-    "#debug"
-  )!.outerHTML = `<hx-debug style="display: none"></hx-debug>`;
-}
-
 const debugEl = document.querySelector("hx-debug")!;
 let tabGroup: SlTabGroup;
 
@@ -112,7 +106,7 @@ const state = {
     (window as any).view = view;
 
     view.focus();
-    debugEl.style.display = "";
+    document.body.classList.add("hud-active");
   }
 }
 
@@ -229,7 +223,9 @@ function createView(file: string, doc: string, parent: HTMLElement) {
             return { message: "global search is not implemented", error: true };
           },
         }),
-        codemirror.helix(),
+        codemirror.helix({
+          config: configFromInput(),
+        }),
         debugPlugin().extension,
         codemirror.syntaxHighlighting(codemirror.defaultHighlightStyle),
         codemirror.javascript({
@@ -248,7 +244,7 @@ function createView(file: string, doc: string, parent: HTMLElement) {
           },
           {
             name: "reset",
-            help: "Resets all stored documents",
+            help: "Resets all stored documents and settings",
             handler() {
               localStorage.clear();
               window.location.reload();
@@ -309,6 +305,57 @@ async function getFiles(): Promise<Record<string, string>> {
   // @ts-ignore
   const mod = await import("folder:..");
   return mod.default;
+}
+
+const optionsEl = document.querySelector("#options")! as HTMLElement;
+
+{
+  const currentConfig = configFromStorage();
+
+  if (currentConfig != null) {
+    for (const [key, value] of Object.entries(currentConfig)) {
+      const el = optionsEl.querySelector(`[name="${key}"]`);
+
+      if (!el) {
+        continue;
+      }
+
+      if (el instanceof HTMLSelectElement) {
+        el.value = value as string;
+      }
+    }
+  }
+}
+
+for (const control of optionsEl.querySelectorAll("[data-option]")) {
+  if (control instanceof HTMLSelectElement) {
+    control.onchange = () => {
+      const config = configFromInput();
+      localStorage.setItem("cm-hx-config", JSON.stringify(config));
+      window.location.reload();
+    };
+  }
+}
+
+function configFromInput() {
+  const config: Record<string, string> = {};
+  const controls = optionsEl.querySelectorAll("[data-option]");
+
+  for (const control of controls) {
+    if (control instanceof HTMLSelectElement) {
+      config[control.name] = (
+        [...control.children] as HTMLOptionElement[]
+      ).find((opt) => opt.selected)!.value;
+    }
+  }
+
+  return config;
+}
+
+function configFromStorage() {
+  const config = localStorage.getItem("cm-hx-config");
+
+  return config && JSON.parse(config);
 }
 
 function updateDebug(el: Debug, view: EditorView) {

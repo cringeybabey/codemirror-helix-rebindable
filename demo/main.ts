@@ -1,24 +1,7 @@
-import { EditorState } from "@codemirror/state";
-import { EditorView, ViewPlugin, lineNumbers } from "@codemirror/view";
-import { javascript } from "@codemirror/lang-javascript";
-import {
-  defaultHighlightStyle,
-  syntaxHighlighting,
-} from "@codemirror/language";
-import "@shoelace-style/shoelace/dist/themes/light.css";
-import "@shoelace-style/shoelace/dist/components/tab/tab";
-import "@shoelace-style/shoelace/dist/components/tab-group/tab-group";
-import "@shoelace-style/shoelace/dist/components/tab-panel/tab-panel";
+import type { EditorView } from "@codemirror/view";
 import type SlTabPanel from "@shoelace-style/shoelace/dist/components/tab-panel/tab-panel";
+import type SlTabGroup from "@shoelace-style/shoelace/dist/components/tab-group/tab-group.component";
 
-import {
-  commands,
-  externalCommands,
-  helix,
-  globalStateSync,
-  resetMode,
-} from "../src/lib";
-import { historyField, registersField } from "../src/state";
 import { Picker } from "./components/picker";
 import { Debug } from "./components/debug";
 
@@ -30,25 +13,61 @@ const filePickerOptions = fileNames.map((value: string) => ({ value }));
 window.customElements.define("hx-picker", Picker);
 window.customElements.define("hx-debug", Debug);
 
-{
+let codemirror: typeof import("./codemirror");
+
+const debugEl = document.querySelector("hx-debug")!;
+let tabGroup: SlTabGroup;
+
+function initShoelace() {
   document.querySelector(
     "#editor"
   )!.outerHTML = `<sl-tab-group activation="manual"></sl-tab-group>`;
-  document.querySelector(
-    "#debug"
-  )!.outerHTML = `<hx-debug style="display: none"></hx-debug>`;
+
+  tabGroup = document.querySelector("sl-tab-group")!;
+
+  tabGroup.addEventListener("sl-tab-show", (e) => {
+    const old = state.active;
+    const panels = [...tabGroup.querySelectorAll("sl-tab-panel")];
+    const changed = panels.length > 1;
+
+    if (changed) {
+      state.active = panels.indexOf(
+        tabGroup.querySelector(
+          `sl-tab-panel[name="${(e as any).detail.name}"]`
+        )!
+      );
+    }
+
+    const view = state.editors.get(state.tabs[state.active])!.view;
+
+    updateDebug(debugEl, view);
+    setTimeout(() => view.focus());
+
+    (window as any).view = view;
+
+    if (changed) {
+      const prevView = state.editors.get(state.tabs[old])!.view;
+
+      view.dispatch(...codemirror.globalStateSync(prevView.state), {
+        effects: codemirror.resetMode,
+      });
+    }
+
+    const callback = state.callback;
+    state.callback = () => {};
+
+    callback();
+  });
 }
 
-const debugEl = document.querySelector("hx-debug")!;
-const tabGroup = document.querySelector("sl-tab-group")!;
-
-const debugPlugin = ViewPlugin.define((view) => {
-  return {
-    update(_viewUpdate) {
-      updateDebug(debugEl, view);
-    },
-  };
-});
+const debugPlugin = () =>
+  codemirror.ViewPlugin.define((view) => {
+    return {
+      update(_viewUpdate) {
+        updateDebug(debugEl, view);
+      },
+    };
+  });
 
 const state = {
   editors: new Map<string, { view: EditorView; panel: SlTabPanel }>(),
@@ -61,46 +80,34 @@ const state = {
   callback: () => {},
 };
 
-tabGroup.addEventListener("sl-tab-show", (e) => {
-  const old = state.active;
-  const panels = [...tabGroup.querySelectorAll("sl-tab-panel")];
-  const changed = panels.length > 1;
-
-  if (changed) {
-    state.active = panels.indexOf(
-      tabGroup.querySelector(`sl-tab-panel[name="${(e as any).detail.name}"]`)!
-    );
-  }
-
-  const view = state.editors.get(state.tabs[state.active])!.view;
-
-  updateDebug(debugEl, view);
-  setTimeout(() => view.focus());
-
-  (window as any).view = view;
-
-  if (changed) {
-    const prevView = state.editors.get(state.tabs[old])!.view;
-
-    view.dispatch(...globalStateSync(prevView.state), { effects: resetMode });
-  }
-
-  const callback = state.callback;
-  state.callback = () => {};
-
-  callback();
-});
-
 {
-  const picker = createPicker(undefined, async (file) => {
+  const loaded = Promise.all([
+    import("./codemirror").then((mod) => {
+      codemirror = mod;
+    }),
+    import("./shoelace").then(() => initShoelace()),
+    // @ts-ignore
+    import("folder:.."),
+  ]);
+
+  if (process.env.NODE_ENV === "development") {
+    main("src/lib.ts");
+  } else {
+    const picker = createPicker(undefined, async (file) => {
+      await main(file);
+    });
+
+    picker.initOptions(filePickerOptions);
+  }
+
+  async function main(file: string) {
+    await loaded;
     const view = await createViewPanel(file);
     (window as any).view = view;
 
     view.focus();
-    debugEl.style.display = "";
-  });
-
-  picker.initOptions(filePickerOptions);
+    document.body.classList.add("hud-active");
+  }
 }
 
 async function createViewPanel(file: string) {
@@ -135,11 +142,11 @@ async function createViewPanel(file: string) {
 }
 
 function createView(file: string, doc: string, parent: HTMLElement) {
-  const view = new EditorView({
-    state: EditorState.create({
+  const view = new codemirror.EditorView({
+    state: codemirror.EditorState.create({
       doc,
       extensions: [
-        externalCommands.of({
+        codemirror.externalCommands.of({
           buffer_picker() {
             const picker = createPicker(view, (value) => {
               tabGroup.show(value);
@@ -216,14 +223,16 @@ function createView(file: string, doc: string, parent: HTMLElement) {
             return { message: "global search is not implemented", error: true };
           },
         }),
-        helix(),
-        debugPlugin.extension,
-        syntaxHighlighting(defaultHighlightStyle),
-        javascript({
+        codemirror.helix({
+          config: configFromInput(),
+        }),
+        debugPlugin().extension,
+        codemirror.syntaxHighlighting(codemirror.defaultHighlightStyle),
+        codemirror.javascript({
           typescript: true,
         }),
-        lineNumbers(),
-        commands.of([
+        codemirror.lineNumbers(),
+        codemirror.commands.of([
           {
             name: "write",
             aliases: ["w"],
@@ -235,7 +244,7 @@ function createView(file: string, doc: string, parent: HTMLElement) {
           },
           {
             name: "reset",
-            help: "Resets all stored documents",
+            help: "Resets all stored documents and settings",
             handler() {
               localStorage.clear();
               window.location.reload();
@@ -298,8 +307,59 @@ async function getFiles(): Promise<Record<string, string>> {
   return mod.default;
 }
 
+const optionsEl = document.querySelector("#options")! as HTMLElement;
+
+{
+  const currentConfig = configFromStorage();
+
+  if (currentConfig != null) {
+    for (const [key, value] of Object.entries(currentConfig)) {
+      const el = optionsEl.querySelector(`[name="${key}"]`);
+
+      if (!el) {
+        continue;
+      }
+
+      if (el instanceof HTMLSelectElement) {
+        el.value = value as string;
+      }
+    }
+  }
+}
+
+for (const control of optionsEl.querySelectorAll("[data-option]")) {
+  if (control instanceof HTMLSelectElement) {
+    control.onchange = () => {
+      const config = configFromInput();
+      localStorage.setItem("cm-hx-config", JSON.stringify(config));
+      window.location.reload();
+    };
+  }
+}
+
+function configFromInput() {
+  const config: Record<string, string> = {};
+  const controls = optionsEl.querySelectorAll("[data-option]");
+
+  for (const control of controls) {
+    if (control instanceof HTMLSelectElement) {
+      config[control.name] = (
+        [...control.children] as HTMLOptionElement[]
+      ).find((opt) => opt.selected)!.value;
+    }
+  }
+
+  return config;
+}
+
+function configFromStorage() {
+  const config = localStorage.getItem("cm-hx-config");
+
+  return config && JSON.parse(config);
+}
+
 function updateDebug(el: Debug, view: EditorView) {
-  el.registers = view.state.field(registersField);
+  el.registers = view.state.field(codemirror.registersField);
   el.selection = view.state.selection.main;
-  el.history = view.state.field(historyField);
+  el.history = view.state.field(codemirror.historyField);
 }

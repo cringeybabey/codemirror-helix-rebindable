@@ -10,6 +10,12 @@ npm exec --no esbuild -- \
 
 DECL_OUT=$(mktemp -d)
 
+echo
+echo Generating declarations
+echo
+
 npm exec --no tsc -- --noEmit false --declaration --emitDeclarationOnly --outDir $DECL_OUT
+
 cp $DECL_OUT/lib.d.ts dist/
+
 rm -r $DECL_OUT/

@@ -39,3 +39,11 @@ hx-picker input {
   background: inherit;
   width: 100%;
 }
+
+.hud {
+  display: none;
+}
+
+.hud-active .hud {
+  display: inherit;
+}

@@ -25,6 +25,7 @@
     "development": "./dist/lib.development.js",
     "default": "./dist/lib.js"
   },
+  "sideEffects": false,
   "devDependencies": {
     "@codemirror/lang-javascript": "^6.0.0",
     "@lezer/common": "^1.2.1",

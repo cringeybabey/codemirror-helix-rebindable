@@ -1,4 +1,12 @@
-import { EditorState, StateEffect, StateField, Text } from "@codemirror/state";
+import {
+  EditorSelection,
+  EditorState,
+  StateEffect,
+  StateField,
+  Text,
+  Transaction,
+  TransactionSpec,
+} from "@codemirror/state";
 import { MinorMode, ModeState, ModeType } from "./entities";
 
 export const modeEffect = StateEffect.define<ModeState>();
@@ -211,3 +219,143 @@ export const historyField = StateField.define<{
     return value;
   },
 });
+
+export const syntaxHistoryEffect = StateEffect.define<
+  | {
+      type: "add";
+      prev: EditorSelection;
+      next: EditorSelection;
+    }
+  | {
+      type: "move";
+      offset: 1 | -1;
+    }
+  | {
+      type: "reset";
+    }
+  | {
+      type: "freeze";
+      frozen?: boolean;
+    }
+>();
+
+export const syntaxHistoryField = StateField.define<
+  {
+    cursor: number;
+    frozen: boolean;
+  } & (
+    | {
+        selections: [];
+        head: null;
+      }
+    | {
+        selections: [EditorSelection, ...EditorSelection[]];
+        head: EditorSelection;
+      }
+  )
+>({
+  create() {
+    return { selections: [], cursor: 0, head: null, frozen: false };
+  },
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(syntaxHistoryEffect)) {
+        switch (effect.value.type) {
+          case "freeze": {
+            value = { ...value, frozen: effect.value.frozen ?? true };
+            break;
+          }
+          case "add": {
+            value = {
+              selections: [...value.selections, effect.value.prev],
+              cursor: value.cursor + 1,
+              head: effect.value.next,
+              frozen: false,
+            };
+            break;
+          }
+          case "move": {
+            value = {
+              ...value,
+              cursor: value.cursor + effect.value.offset,
+            };
+            break;
+          }
+          case "reset": {
+            if (!value.frozen) {
+              value = {
+                frozen: false,
+                selections: [],
+                cursor: 0,
+                head: null,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    return value;
+  },
+});
+
+export function expandSyntaxHistory(
+  state: EditorState,
+  expand: (start: TransactionSpec, callback: (tr: Transaction) => void) => void,
+  done: (spec: TransactionSpec) => void
+) {
+  const history = state.field(syntaxHistoryField);
+
+  if (history.cursor < history.selections.length) {
+    done({
+      selection:
+        history.cursor === history.selections.length - 1
+          ? history.head!
+          : history.selections[history.cursor + 1],
+      effects: syntaxHistoryEffect.of({ type: "move", offset: +1 }),
+    });
+
+    return;
+  }
+
+  expand(
+    {
+      effects: syntaxHistoryEffect.of({ type: "freeze" }),
+    },
+    (tr) => {
+      done(
+        tr.selection?.eq(state.selection)
+          ? {
+              effects: syntaxHistoryEffect.of({
+                type: "freeze",
+                frozen: false,
+              }),
+            }
+          : {
+              selection: tr.selection,
+              changes: tr.changes,
+              scrollIntoView: tr.scrollIntoView,
+              effects: [
+                ...tr.effects,
+                syntaxHistoryEffect.of({
+                  type: "add",
+                  prev: state.selection,
+                  next: tr.newSelection,
+                }),
+              ],
+            }
+      );
+    }
+  );
+}
+
+export function undoSyntaxHistory(state: EditorState) {
+  const history = state.field(syntaxHistoryField);
+
+  if (history.cursor > 0) {
+    return {
+      selection: history.selections[history.cursor - 1],
+      effects: syntaxHistoryEffect.of({ type: "move", offset: -1 }),
+    };
+  }
+}

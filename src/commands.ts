@@ -7,7 +7,7 @@ import {
   Text,
   findClusterBreak,
 } from "@codemirror/state";
-import { modeEffect, modeField } from "./state";
+import { modeEffect, modeField, yankEffect } from "./state";
 import { matchBrackets, syntaxTree } from "@codemirror/language";
 import type { SyntaxNode } from "@lezer/common";
 import { cursorLineStart, selectLineStart } from "@codemirror/commands";
@@ -106,6 +106,42 @@ export function cmSelToInternal(range: SelectionRange, doc: Text) {
     range.goalColumn,
     range.bidiLevel ?? undefined
   );
+}
+
+export function removeText(
+  view: ViewLike,
+  { yank, edit }: { yank?: boolean; edit?: boolean } = {}
+) {
+  const selection = view.state.selection.main;
+
+  const effects = [];
+
+  yank ??= true;
+
+  if (yank) {
+    effects.push(
+      yankEffect.of([`"`, view.state.doc.slice(selection.from, selection.to)])
+    );
+  }
+
+  if (edit) {
+    effects.push(MODE_EFF.INSERT);
+  }
+
+  view.dispatch({
+    effects,
+    changes: {
+      from: selection.from,
+      to: selection.to,
+      insert: "",
+    },
+  });
+
+  if (!edit && view.state.selection.main.empty) {
+    view.dispatch({
+      selection: internalSelToCM(view.state.selection.main, view.state.doc),
+    });
+  }
 }
 
 export function internalSelToCM(range: SelectionRange, doc: Text) {
@@ -682,6 +718,43 @@ export function insertLineAndEdit(view: ViewLike, below: boolean) {
     selection: EditorSelection.cursor(cursor),
     effects: MODE_EFF.INSERT,
   });
+}
+
+export const countCommands = Object.fromEntries(
+  Array.from({ length: 10 }, (_, count) => [
+    String(count),
+    (view: EditorView, mode: NonInsertMode) => {
+      const next = mode.count != null ? mode.count * 10 + count : count;
+
+      if (next === 0) {
+        return;
+      }
+
+      view.dispatch({
+        effects: modeEffect.of({ ...mode, count: next }),
+      });
+    },
+  ])
+);
+
+export function insertLine(view: ViewLike, below: boolean) {
+  const mode = view.state.field(modeField);
+
+  const count = mode.type === ModeType.Insert ? 1 : cmdCount(mode);
+  const select = mode.type === ModeType.Select;
+
+  const selection = view.state.selection.main;
+
+  const line = view.state.doc.lineAt(below ? selection.to : selection.from);
+
+  const changes = {
+    from: below ? line.to : line.from,
+    insert: view.state.lineBreak.repeat(count),
+  };
+
+  const resetEffect = select ? MODE_EFF.SELECT : MODE_EFF.NORMAL;
+
+  view.dispatch({ changes, effects: resetEffect });
 }
 
 export function cmdCount(mode: NonInsertMode) {

@@ -26,7 +26,7 @@ run-tests:
     - if: '$CI_COMMIT_BRANCH != "release"'
   before_script:
     - apt update
-    - apt install -y libgtk-3-0 libasound2 libx11-xcb-dev libnss3 libgbm-dev libdrm2
+    - apt install -y libgtk-3-0 libasound2 libx11-xcb-dev libnss3 libgbm-dev libdrm2 xz-utils
   script:
     - npm ci --cache npm_cache
     - npm test

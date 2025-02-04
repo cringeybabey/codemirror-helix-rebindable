@@ -71,6 +71,10 @@ function minorModeStr(minor: MinorMode) {
       return "m";
     case MinorMode.Space:
       return "<space>";
+    case MinorMode.LeftBracket:
+      return "[";
+    case MinorMode.RightBracket:
+      return "]";
     default: {
       if (process.env.NODE_ENV === "development") {
         throw new Error("Unexpected mode");

@@ -5,6 +5,7 @@ type Assertion =
   | string
   | {
       selection: [anchor: number, head: number];
+      text?: string;
     };
 
 const slow = false;
@@ -67,6 +68,34 @@ const cases: Array<[string, string | string[], string[], Assertion]> = [
     ["/", "0", "5", "0", "Enter", "/", "1", "3", "0", "Escape"],
     { selection: [196, 199] },
   ],
+  ["delete repeatedly", "hello world", ["5", "l", "d", "d", "d"], "hellorld"],
+  [
+    "join lines",
+    "hello world\nhelix rocks\nplugins when",
+    ["5", "l", "v", "j", "J"],
+    {
+      selection: [5, 18],
+      text: "hello world helix rocks\nplugins when",
+    },
+  ],
+  [
+    "join lines, trimming",
+    "hello world\n   helix rocks\nplugins when",
+    ["7", "l", "v", "j", "J"],
+    {
+      selection: [7, 17],
+      text: "hello world helix rocks\nplugins when",
+    },
+  ],
+  [
+    "join lines, trimming partially",
+    "hello world\n   helix rocks\nplugins when",
+    ["l", "v", "j", "J"],
+    {
+      selection: [1, 12],
+      text: "hello world helix rocks\nplugins when",
+    },
+  ],
 ];
 
 describe("codemirror-helix", () => {
@@ -85,17 +114,24 @@ describe("codemirror-helix", () => {
 
       await (slow ? wait(1000) : undefined);
 
-      if (typeof expected === "string") {
-        const doc = await getDoc();
+      const expectedSelection =
+        typeof expected === "string" ? null : expected.selection;
+      const expectedText =
+        typeof expected === "string" ? expected : expected.text;
 
-        expect(doc).toBe(expected);
-      } else {
+      if (expectedSelection != null) {
         const selection = await getSelection();
 
         expect(selection).toEqual({
-          anchor: expected.selection[0],
-          head: expected.selection[1],
+          anchor: expectedSelection[0],
+          head: expectedSelection[1],
         });
+      }
+
+      if (expectedText != null) {
+        const doc = await getDoc();
+
+        expect(doc).toBe(expectedText);
       }
     });
   }

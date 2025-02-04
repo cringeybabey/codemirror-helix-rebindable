@@ -75,8 +75,10 @@ import {
   changeCase,
   cmSelToInternal,
   cmdCount,
+  countCommands,
   cursorToLineEnd,
   cursorToLineStart,
+  insertLine,
   insertLineAndEdit,
   internalSelToCM,
   matchBracket,
@@ -87,6 +89,7 @@ import {
   moveToSibling,
   moveUp,
   paste,
+  removeText,
   replaceWithChar,
   resetCount,
   setFindMode,
@@ -214,6 +217,8 @@ const helixCommandBindings: {
   goto: Record<string, CommandDef<NonInsertMode>>;
   match: Record<string, CommandDef<NonInsertMode>>;
   space: Record<string, CommandDef<NonInsertMode>>;
+  leftBracket: Record<string, CommandDef<NonInsertMode>>;
+  rightBracket: Record<string, CommandDef<NonInsertMode>>;
 } = {
   insert: {
     Backspace(view) {
@@ -268,22 +273,7 @@ const helixCommandBindings: {
 
       panel.showSearchInput();
     },
-    ...Object.fromEntries(
-      Array.from({ length: 10 }, (_, count) => [
-        String(count),
-        (view, mode) => {
-          const next = mode.count != null ? mode.count * 10 + count : count;
-
-          if (next === 0) {
-            return;
-          }
-
-          view.dispatch({
-            effects: modeEffect.of({ ...mode, count: next }),
-          });
-        },
-      ])
-    ),
+    ...countCommands,
     [":"](view, mode) {
       view.dispatch({
         effects: modeEffect.of({ ...mode, count: undefined }),
@@ -342,42 +332,25 @@ const helixCommandBindings: {
     ["c"]: {
       checkpoint: "temp",
       command(view) {
-        const selection = view.state.selection.main;
-
-        view.dispatch({
-          effects: [
-            yankEffect.of([
-              `"`,
-              view.state.doc.slice(selection.from, selection.to),
-            ]),
-            MODE_EFF.INSERT,
-          ],
-          changes: {
-            from: selection.from,
-            to: selection.to,
-            insert: "",
-          },
-        });
+        removeText(view, { edit: true });
       },
     },
     ["d"]: {
       checkpoint: true,
       command(view) {
-        const selection = view.state.selection.main;
-
-        view.dispatch({
-          effects: [
-            yankEffect.of([
-              `"`,
-              view.state.doc.slice(selection.from, selection.to),
-            ]),
-            MODE_EFF.NORMAL,
-          ],
-          changes: {
-            from: selection.from,
-            to: selection.to,
-          },
-        });
+        removeText(view);
+      },
+    },
+    ["Alt-c"]: {
+      checkpoint: "temp",
+      command(view) {
+        removeText(view, { yank: false, edit: true });
+      },
+    },
+    ["Alt-d"]: {
+      checkpoint: true,
+      command(view) {
+        removeText(view, { yank: false });
       },
     },
     ["P"]: {
@@ -888,6 +861,96 @@ const helixCommandBindings: {
     },
     ["Home"]: cursorToLineStart,
     ["End"]: cursorToLineEnd,
+    ["J"]: {
+      checkpoint: true,
+      command(view) {
+        const selection = view.state.selection.main;
+
+        const { doc } = view.state;
+
+        const startLine = doc.lineAt(selection.from);
+
+        if (startLine.number >= doc.lines) {
+          return;
+        }
+
+        let endLine = doc.lineAt(selection.to);
+
+        const sameLine = endLine.number === startLine.number;
+
+        if (sameLine) {
+          endLine = doc.line(startLine.number + 1);
+        }
+
+        let content = "";
+        let removed = 0;
+
+        for (
+          let lineNo = startLine.number;
+          lineNo <= endLine.number;
+          lineNo++
+        ) {
+          let lineContent = startLine.text;
+
+          if (lineNo > startLine.number) {
+            const lineText = doc.line(lineNo).text;
+
+            lineContent = lineText.trimStart();
+
+            let trimmed = lineText.length - lineContent.length;
+
+            if (
+              !sameLine &&
+              lineNo === endLine.number &&
+              selection.to - endLine.from < trimmed
+            ) {
+              // FIXME: this is not the actual behavior in Helix.
+              trimmed = selection.to - endLine.from;
+            }
+
+            removed += trimmed;
+          }
+
+          content += lineContent;
+          content += lineNo === endLine.number ? "" : " ";
+        }
+
+        const newTo = sameLine
+          ? selection.to
+          : selection.to -
+            removed -
+            (endLine.number - startLine.number) *
+              (view.state.lineBreak.length - 1);
+
+        view.dispatch({
+          changes: {
+            from: startLine.from,
+            to: endLine.to,
+            insert: content,
+          },
+          selection:
+            selection.anchor > selection.head
+              ? EditorSelection.range(newTo, selection.from)
+              : EditorSelection.range(selection.from, newTo),
+        });
+      },
+    },
+    ["["](view, mode) {
+      view.dispatch({
+        effects: modeEffect.of({
+          type: mode.type,
+          minor: MinorMode.LeftBracket,
+        }),
+      });
+    },
+    ["]"](view, mode) {
+      view.dispatch({
+        effects: modeEffect.of({
+          type: mode.type,
+          minor: MinorMode.RightBracket,
+        }),
+      });
+    },
   },
   goto: {
     ["g"](view, mode) {
@@ -1076,6 +1139,24 @@ const helixCommandBindings: {
       });
     },
   },
+  leftBracket: {
+    ...countCommands,
+    ["Space"]: {
+      checkpoint: true,
+      command(view) {
+        insertLine(view, false);
+      },
+    },
+  },
+  rightBracket: {
+    ...countCommands,
+    ["Space"]: {
+      checkpoint: true,
+      command(view) {
+        insertLine(view, true);
+      },
+    },
+  },
 };
 
 function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
@@ -1143,9 +1224,17 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
     const spaceCommand = getExplicitCommand(key, keybindings.space) as
       | ExplicitCommandDef<NonInsertMode>
       | undefined;
+    const leftBracketCommand = getExplicitCommand(
+      key,
+      keybindings.leftBracket
+    ) as ExplicitCommandDef<NonInsertMode> | undefined;
+    const rightBracketCommand = getExplicitCommand(
+      key,
+      keybindings.rightBracket
+    ) as ExplicitCommandDef<NonInsertMode> | undefined;
 
     const esc = key === "Escape";
-    const isChar = key.length === 1;
+    const isChar = key.length === 1 || key === "Space";
 
     const command = (view: EditorView) => {
       const mode = view.state.field(modeField);
@@ -1172,6 +1261,10 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
         result = apply(matchCommand, view, mode);
       } else if (mode.minor === MinorMode.Space && spaceCommand) {
         result = apply(spaceCommand, view, mode);
+      } else if (mode.minor === MinorMode.LeftBracket && leftBracketCommand) {
+        result = apply(leftBracketCommand, view, mode);
+      } else if (mode.minor === MinorMode.RightBracket && rightBracketCommand) {
+        result = apply(rightBracketCommand, view, mode);
       } else {
         return false;
       }

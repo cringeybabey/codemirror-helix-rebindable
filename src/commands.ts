@@ -694,17 +694,19 @@ export function paste(
   );
 }
 
-export function insertLineAndEdit(view: ViewLike, below: boolean) {
+export function openLine(view: ViewLike, below: boolean) {
   let from: number;
   let cursor: number;
 
+  const selection = cmSelToInternal(view.state.selection.main, view.state.doc);
+
   if (below) {
-    const line = view.state.doc.lineAt(view.state.selection.main.to);
+    const line = view.state.doc.lineAt(selection.to);
 
     from = line.to;
     cursor = from + view.state.lineBreak.length;
   } else {
-    const line = view.state.doc.lineAt(view.state.selection.main.from);
+    const line = view.state.doc.lineAt(selection.from);
 
     from = line.from;
     cursor = from;

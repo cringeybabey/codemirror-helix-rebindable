@@ -79,7 +79,7 @@ import {
   cursorToLineEnd,
   cursorToLineStart,
   insertLine,
-  insertLineAndEdit,
+  openLine,
   internalSelToCM,
   matchBracket,
   moveByHalfPage,
@@ -480,13 +480,13 @@ const helixCommandBindings: {
     ["o"]: {
       checkpoint: "temp",
       command(view) {
-        insertLineAndEdit(view, true);
+        openLine(view, true);
       },
     },
     ["O"]: {
       checkpoint: "temp",
       command(view) {
-        insertLineAndEdit(view, false);
+        openLine(view, false);
       },
     },
     ["f"](view, mode) {

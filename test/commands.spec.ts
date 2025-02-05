@@ -1,4 +1,4 @@
-import { expect, browser } from "@wdio/globals";
+import { expect, browser, $ } from "@wdio/globals";
 import { Key } from "webdriverio";
 
 type Assertion =
@@ -10,7 +10,11 @@ type Assertion =
 
 const slow = false;
 
-const cases: Array<[string, string | string[], string[], Assertion]> = [
+type Case =
+  | [string, string | string[], string[], Assertion]
+  | [boolean, string, string | string[], string[], Assertion];
+
+const cases: Case[] = [
   ["moves to line end", ["foo", "bar"], ["g", "l"], { selection: [3, 2] }],
   [
     "moves to line end, back from linebreak",
@@ -96,13 +100,36 @@ const cases: Array<[string, string | string[], string[], Assertion]> = [
       text: "hello world helix rocks\nplugins when",
     },
   ],
+  [
+    "insert line and edit, at line break",
+    "hello world\nhelix rocks",
+    ["g", "l", "l", "o", "Escape"],
+    {
+      selection: [13, 12],
+      text: "hello world\n\nhelix rocks",
+    },
+  ],
 ];
 
 describe("codemirror-helix", () => {
-  for (const [title, text, commands, expected] of cases) {
+  const skipping = cases.some((case_) => case_.length === 5);
+
+  for (const case_ of cases) {
+    let only = !skipping;
+    let title: string;
+    let text: string;
+    let commands: string[];
+    let expected: Assertion;
+
+    if (case_.length === 5) {
+      [only, title, text, commands, expected] = case_ as any;
+    } else {
+      [title, text, commands, expected] = case_ as any;
+    }
+
     const keys = toKeys(commands);
 
-    it(title, async () => {
+    (only ? it.only : it)(title, async () => {
       await browser.url("http://localhost:45183");
 
       await initEditor(text);

@@ -2,7 +2,7 @@ import { EditorView, Panel } from "@codemirror/view";
 import { EditorSelection, FacetReader } from "@codemirror/state";
 import type { TypableCommand } from "./lib";
 import { modeStatus } from "./state";
-import { ModeState } from "./entities";
+import { ModeState, SearchMode } from "./entities";
 
 export const panelStyles = EditorView.theme({
   ".cm-hx-status-panel": {
@@ -57,7 +57,7 @@ export class CommandPanel implements Panel {
   constructor(
     private view: EditorView,
     private commandFacet: FacetReader<TypableCommand[]>,
-    private startSearch: (global: boolean) => {
+    private startSearch: (mode: SearchMode) => {
       onInput(input: string): void;
       onClose(accept: boolean): CommandPanelMessage | void;
       init: string;
@@ -94,10 +94,13 @@ export class CommandPanel implements Panel {
     $style(this.minorCommand, { minWidth: "8em", textAlign: "center " });
   }
 
-  showSearchInput(global = false) {
-    const input = this.searchInput(global);
+  showSearchInput(mode = SearchMode.Normal) {
+    const input = this.searchInput(mode);
 
-    this.showInput(input, global ? "global-search:" : "search:");
+    this.showInput(
+      input,
+      mode === SearchMode.Global ? "global-search:" : "search:"
+    );
   }
 
   showCommandInput() {
@@ -361,8 +364,8 @@ export class CommandPanel implements Panel {
     });
   }
 
-  private searchInput(global: boolean) {
-    const search = this.startSearch(global);
+  private searchInput(mode: SearchMode) {
+    const search = this.startSearch(mode);
 
     return this.createInput({
       placeholder: search.init,

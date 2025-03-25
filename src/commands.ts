@@ -56,14 +56,13 @@ export const MODE_EFF = {
 };
 
 function moveByChar(view: EditorView, mode: NonInsertMode, forward: boolean) {
-  const initial = view.state.selection.main;
   const select = mode.type === ModeType.Select;
 
   const next = select
     ? selectByChar(view, mode, forward)
     : cursorByChar(view, mode, forward);
 
-  if (initial.eq(next)) {
+  if (view.state.selection.eq(next)) {
     return false;
   }
 
@@ -78,13 +77,17 @@ function moveByChar(view: EditorView, mode: NonInsertMode, forward: boolean) {
 
 export function withHelixSelection(view: EditorView, command: Command) {
   view.dispatch({
-    selection: cmSelToInternal(view.state.selection.main, view.state.doc),
+    selection: mapSel(view.state.selection, (range) =>
+      cmSelToInternal(range, view.state.doc)
+    ),
   });
 
   const result = command(view);
 
   view.dispatch({
-    selection: internalSelToCM(view.state.selection.main, view.state.doc),
+    selection: mapSel(view.state.selection, (range) =>
+      internalSelToCM(range, view.state.doc)
+    ),
   });
 
   return result;
@@ -112,13 +115,14 @@ export function removeText(
   view: ViewLike,
   { yank, edit }: { yank?: boolean; edit?: boolean } = {}
 ) {
-  const selection = view.state.selection.main;
-
   const effects = [];
 
   yank ??= true;
 
   if (yank) {
+    // TODO: registers per cursor
+    const selection = view.state.selection.main;
+
     effects.push(
       yankEffect.of([`"`, view.state.doc.slice(selection.from, selection.to)])
     );
@@ -130,16 +134,18 @@ export function removeText(
 
   view.dispatch({
     effects,
-    changes: {
-      from: selection.from,
-      to: selection.to,
+    changes: view.state.selection.ranges.map((range) => ({
+      from: range.from,
+      to: range.to,
       insert: "",
-    },
+    })),
   });
 
-  if (!edit && view.state.selection.main.empty) {
+  if (!edit && view.state.selection.ranges.some((range) => range.empty)) {
     view.dispatch({
-      selection: internalSelToCM(view.state.selection.main, view.state.doc),
+      selection: mapSel(view.state.selection, (range) =>
+        internalSelToCM(range, view.state.doc)
+      ),
     });
   }
 }
@@ -170,25 +176,33 @@ export function cursorToLineStart(view: EditorView, mode: NonInsertMode) {
   });
 }
 
-export function cursorToLineEnd(view: EditorView, mode: NonInsertMode) {
-  const select = mode.type === ModeType.Select;
-
-  const selection = cmSelToInternal(view.state.selection.main, view.state.doc);
+function cursorToLineEndRange(
+  range: SelectionRange,
+  view: EditorView,
+  select: boolean
+) {
+  const selection = cmSelToInternal(range, view.state.doc);
 
   const line = view.state.doc.lineAt(selection.head);
 
   if (line.length === 0) {
-    return false;
+    return selection;
   }
 
   const goal = nextClusterBreak(view.state.doc, line.to, false);
 
-  const next = select
+  return select
     ? EditorSelection.range(selection.anchor, goal, selection.goalColumn)
     : EditorSelection.cursor(goal, undefined, undefined, selection.goalColumn);
+}
+
+export function cursorToLineEnd(view: EditorView, mode: NonInsertMode) {
+  const select = mode.type === ModeType.Select;
 
   view.dispatch({
-    selection: internalSelToCM(next, view.state.doc),
+    selection: mapSel(view.state.selection, (range) =>
+      internalSelToCM(cursorToLineEndRange(range, view, select), view.state.doc)
+    ),
     effects: select ? MODE_EFF.SELECT : MODE_EFF.NORMAL,
   });
 
@@ -198,105 +212,119 @@ export function cursorToLineEnd(view: EditorView, mode: NonInsertMode) {
 function cursorByChar(view: EditorView, mode: NonInsertMode, forward: boolean) {
   const doc = view.state.doc;
   const count = cmdCount(mode);
-  const selection = view.state.selection.main;
 
-  let counter = count;
+  return mapSel(view.state.selection, (range) => {
+    let counter = count;
 
-  const by =
-    count > 1
-      ? () => () => {
-          counter--;
+    const by =
+      count > 1
+        ? () => () => {
+            counter--;
 
-          return counter > 0;
-        }
-      : undefined;
+            return counter > 0;
+          }
+        : undefined;
 
-  const cursor = cmSelToInternal(selection, doc).head;
+    const cursor = cmSelToInternal(range, doc).head;
 
-  const moved = view.moveByChar(EditorSelection.cursor(cursor), forward, by);
+    const moved = view.moveByChar(EditorSelection.cursor(cursor), forward, by);
 
-  return internalSelToCM(EditorSelection.cursor(moved.head), doc);
+    return internalSelToCM(EditorSelection.cursor(moved.head), doc);
+  });
 }
 
 function selectByChar(view: EditorView, mode: NonInsertMode, forward: boolean) {
   const doc = view.state.doc;
   const count = cmdCount(mode);
 
-  const initial = cmSelToInternal(view.state.selection.main, doc);
+  return mapSel(view.state.selection, (range) => {
+    const initial = cmSelToInternal(range, doc);
 
-  let counter = count;
+    let counter = count;
 
-  const by =
-    count > 1
-      ? () => () => {
-          counter--;
+    const by =
+      count > 1
+        ? () => () => {
+            counter--;
 
-          return counter > 0;
-        }
-      : undefined;
+            return counter > 0;
+          }
+        : undefined;
 
-  const next = view.moveByChar(
-    EditorSelection.cursor(initial.head),
-    forward,
-    by
-  );
+    const next = view.moveByChar(
+      EditorSelection.cursor(initial.head),
+      forward,
+      by
+    );
 
-  return internalSelToCM(EditorSelection.range(initial.anchor, next.head), doc);
+    return internalSelToCM(
+      EditorSelection.range(initial.anchor, next.head),
+      doc
+    );
+  });
 }
 
 function selectByLine(view: EditorView, mode: NonInsertMode, forward: boolean) {
   const doc = view.state.doc;
   const count = cmdCount(mode);
-  const initial = cmSelToInternal(view.state.selection.main, doc);
-  let selection = initial;
 
-  for (let _i = 0; _i < count; _i++) {
-    selection = view.moveVertically(
-      EditorSelection.cursor(
+  return mapSel(view.state.selection, (range) => {
+    const initial = cmSelToInternal(range, doc);
+    let selection = initial;
+
+    for (let _i = 0; _i < count; _i++) {
+      selection = view.moveVertically(
+        EditorSelection.cursor(
+          selection.head,
+          undefined,
+          undefined,
+          selection.goalColumn
+        ),
+        forward
+      );
+    }
+
+    return internalSelToCM(
+      EditorSelection.range(
+        initial.anchor,
         selection.head,
-        undefined,
-        undefined,
         selection.goalColumn
       ),
-      forward
+      doc
     );
-  }
-
-  return internalSelToCM(
-    EditorSelection.range(initial.anchor, selection.head, selection.goalColumn),
-    doc
-  );
+  });
 }
 
 function cursorByLine(view: EditorView, mode: NonInsertMode, forward: boolean) {
   const doc = view.state.doc;
   const count = cmdCount(mode);
-  const initial = view.state.selection.main;
 
-  const selection = cmSelToInternal(initial, doc);
-  let cursor = selection.head;
-  let goalColumn = selection.goalColumn;
+  return mapSel(view.state.selection, (range) => {
+    const selection = cmSelToInternal(range, doc);
+    let cursor = selection.head;
+    let goalColumn = selection.goalColumn;
 
-  for (let _i = 0; _i < count; _i++) {
-    const line = doc.lineAt(cursor).number;
+    for (let _i = 0; _i < count; _i++) {
+      const line = doc.lineAt(cursor).number;
 
-    if ((forward && line === doc.lines) || (!forward && line === 1)) {
-      break;
+      if ((forward && line === doc.lines) || (!forward && line === 1)) {
+        break;
+      }
+
+      const next = view.moveVertically(
+        EditorSelection.cursor(cursor, undefined, undefined, goalColumn),
+        forward
+      );
+
+      cursor = next.to;
+      goalColumn = next.goalColumn;
     }
 
-    const next = view.moveVertically(
+    return internalSelToCM(
       EditorSelection.cursor(cursor, undefined, undefined, goalColumn),
-      forward
+      doc
     );
-
-    cursor = next.to;
-    goalColumn = next.goalColumn;
-  }
-
-  return internalSelToCM(
-    EditorSelection.cursor(cursor, undefined, undefined, goalColumn),
-    doc
-  );
+  });
 }
 
 export function moveByHalfPage(
@@ -310,93 +338,95 @@ export function moveByHalfPage(
     ? selectByHalfPage(view, forward)
     : cursorByHalfPage(view, forward);
 
-  if (next.eq(view.state.selection.main)) {
+  if (next.eq(view.state.selection)) {
     return false;
   }
 
   view.dispatch({
-    selection: EditorSelection.create([next]),
+    selection: next,
     scrollIntoView: true,
   });
 }
 
 function cursorByHalfPage(view: EditorView, forward: boolean) {
-  const doc = view.state.doc;
-  const selection = cmSelToInternal(view.state.selection.main, doc);
+  return mapSel(view.state.selection, (range) => {
+    const doc = view.state.doc;
+    const selection = cmSelToInternal(range, doc);
 
-  const lineBlock = view.lineBlockAt(doc.lineAt(selection.head).from);
-  const end = view.lineBlockAt(forward ? doc.length : 0);
+    const lineBlock = view.lineBlockAt(doc.lineAt(selection.head).from);
+    const end = view.lineBlockAt(forward ? doc.length : 0);
 
-  const height = Math.min(
-    view.scrollDOM.clientHeight / 2,
-    Math.abs(lineBlock.top - end.top)
-  );
+    const height = Math.min(
+      view.scrollDOM.clientHeight / 2,
+      Math.abs(lineBlock.top - end.top)
+    );
 
-  if (height < 1) {
-    return view.state.selection.main;
-  }
+    if (height < 1) {
+      return range;
+    }
 
-  const next = view.moveVertically(
-    EditorSelection.cursor(
-      selection.head,
-      undefined,
-      undefined,
-      selection.goalColumn
-    ),
-    forward,
-    height
-  );
+    const next = view.moveVertically(
+      EditorSelection.cursor(
+        selection.head,
+        undefined,
+        undefined,
+        selection.goalColumn
+      ),
+      forward,
+      height
+    );
 
-  return internalSelToCM(next, doc);
+    return internalSelToCM(next, doc);
+  });
 }
 
 function selectByHalfPage(view: EditorView, forward: boolean) {
-  const doc = view.state.doc;
-  const selection = cmSelToInternal(view.state.selection.main, doc);
+  return mapSel(view.state.selection, (range) => {
+    const doc = view.state.doc;
+    const selection = cmSelToInternal(range, doc);
 
-  const lineBlock = view.lineBlockAt(doc.lineAt(selection.head).from);
-  const end = view.lineBlockAt(forward ? doc.length : 0);
+    const lineBlock = view.lineBlockAt(doc.lineAt(selection.head).from);
+    const end = view.lineBlockAt(forward ? doc.length : 0);
 
-  const height = Math.min(
-    view.scrollDOM.clientHeight / 2,
-    Math.abs(lineBlock.top - end.top)
-  );
+    const height = Math.min(
+      view.scrollDOM.clientHeight / 2,
+      Math.abs(lineBlock.top - end.top)
+    );
 
-  if (height < 1) {
-    return view.state.selection.main;
-  }
+    if (height < 1) {
+      return range;
+    }
 
-  const next = view.moveVertically(
-    EditorSelection.cursor(
-      selection.head,
-      undefined,
-      undefined,
-      selection.goalColumn
-    ),
-    forward,
-    height
-  );
-
-  return internalSelToCM(
-    EditorSelection.range(selection.anchor, next.head, next.goalColumn),
-    doc
-  );
+    const next = view.moveVertically(
+      EditorSelection.cursor(
+        selection.head,
+        undefined,
+        undefined,
+        selection.goalColumn
+      ),
+      forward,
+      height
+    );
+    return internalSelToCM(
+      EditorSelection.range(selection.anchor, next.head, next.goalColumn),
+      doc
+    );
+  });
 }
 
 function moveByLine(view: EditorView, mode: NonInsertMode, forward: boolean) {
   const select = mode.type === ModeType.Select;
-  const initial = view.state.selection.main;
 
   const next = select
     ? selectByLine(view, mode, forward)
     : cursorByLine(view, mode, forward);
 
-  if (initial.eq(next)) {
+  if (view.state.selection.eq(next)) {
     return false;
   }
 
   view.dispatch({
-    selection: EditorSelection.create([next]),
+    selection: next,
     effects: resetCount(mode),
     scrollIntoView: true,
   });
@@ -452,51 +482,51 @@ function findText(
   }
 ) {
   const mode = view.state.field(modeField);
-  const count = mode.type === ModeType.Insert ? 1 : cmdCount(mode);
   const select = mode.type === ModeType.Select;
-  const selection = cmSelToInternal(view.state.selection.main, view.state.doc);
-  const doc = view.state.doc;
-
-  const start = selection.head;
-
-  const docString = doc.sliceString(0);
-
-  let rawIndex = start;
-
-  for (let _i = 0; _i < count; _i++) {
-    if (!forward && rawIndex === 0) {
-      rawIndex = -1;
-      break;
-    }
-
-    rawIndex = forward
-      ? docString.indexOf(text, rawIndex + 1)
-      : docString.lastIndexOf(text, rawIndex - 1);
-
-    if (rawIndex < 0) {
-      break;
-    }
-  }
-
   const resetEffect = select ? MODE_EFF.SELECT : MODE_EFF.NORMAL;
+  const count = mode.type === ModeType.Insert ? 1 : cmdCount(mode);
 
-  if (rawIndex === -1) {
-    view.dispatch({
-      effects: resetEffect,
-    });
+  const newSelection = mapSel(view.state.selection, (range) => {
+    const selection = cmSelToInternal(range, view.state.doc);
+    const doc = view.state.doc;
 
-    return;
-  }
+    const start = selection.head;
 
-  const index = inclusive ? rawIndex : forward ? rawIndex - 1 : rawIndex + 1;
+    const docString = doc.sliceString(0);
 
-  const newSelection = select
-    ? EditorSelection.range(selection.anchor, index)
-    : EditorSelection.range(selection.head, index);
+    let rawIndex = start;
+
+    for (let _i = 0; _i < count; _i++) {
+      if (!forward && rawIndex === 0) {
+        rawIndex = -1;
+        break;
+      }
+
+      rawIndex = forward
+        ? docString.indexOf(text, rawIndex + 1)
+        : docString.lastIndexOf(text, rawIndex - 1);
+
+      if (rawIndex < 0) {
+        break;
+      }
+    }
+
+    if (rawIndex === -1) {
+      return range;
+    }
+
+    const index = inclusive ? rawIndex : forward ? rawIndex - 1 : rawIndex + 1;
+
+    const next = select
+      ? EditorSelection.range(selection.anchor, index)
+      : EditorSelection.range(selection.head, index);
+
+    return internalSelToCM(next, doc);
+  });
 
   view.dispatch({
     effects: resetEffect,
-    selection: internalSelToCM(newSelection, doc),
+    selection: newSelection,
   });
 }
 
@@ -639,32 +669,36 @@ export function replaceWithChar(_: EditorView, char: string, view: ViewLike) {
 }
 
 export function changeCase(view: ViewLike, upper?: boolean) {
-  const selection = view.state.selection.main;
-  const selected = view.state.doc.sliceString(selection.from, selection.to);
+  view.dispatch(
+    view.state.changeByRange((range) => {
+      const selected = view.state.doc.sliceString(range.from, range.to);
 
-  let insert;
+      let insert;
 
-  if (upper == null) {
-    insert = [...selected]
-      .map((char) => {
-        let next = char.toUpperCase();
+      if (upper == null) {
+        insert = [...selected]
+          .map((char) => {
+            let next = char.toUpperCase();
 
-        return next === char ? char.toLowerCase() : next;
-      })
-      .join("");
-  } else if (upper) {
-    insert = selected.toUpperCase();
-  } else {
-    insert = selected.toLowerCase();
-  }
+            return next === char ? char.toLowerCase() : next;
+          })
+          .join("");
+      } else if (upper) {
+        insert = selected.toUpperCase();
+      } else {
+        insert = selected.toLowerCase();
+      }
 
-  view.dispatch({
-    changes: {
-      from: selection.from,
-      to: selection.to,
-      insert,
-    },
-  });
+      return {
+        range,
+        changes: {
+          from: range.from,
+          to: range.to,
+          insert,
+        },
+      };
+    })
+  );
 }
 
 export function paste(
@@ -691,6 +725,37 @@ export function paste(
       sequential: true,
     },
     reset ? { effects: MODE_EFF.NORMAL } : {}
+  );
+}
+
+export function changeNumber(view: ViewLike, increase: boolean) {
+  const re = /-?\d+/;
+
+  view.dispatch(
+    view.state.changeByRange((range) => {
+      const str = view.state.doc.sliceString(range.from, range.to);
+
+      if (!re.test(str)) {
+        return {
+          range,
+        };
+      }
+
+      const parsed = Number(str);
+      const insert = String(parsed + (increase ? 1 : -1));
+
+      return {
+        range:
+          insert.length === str.length
+            ? range
+            : EditorSelection.range(range.from, range.from + insert.length),
+        changes: {
+          from: range.from,
+          to: range.to,
+          insert,
+        },
+      };
+    })
   );
 }
 
@@ -759,6 +824,21 @@ export function insertLine(view: ViewLike, below: boolean) {
   view.dispatch({ changes, effects: resetEffect });
 }
 
+export function rotateSelection(view: EditorView, forward: boolean) {
+  const { selection } = view.state;
+
+  if (selection.ranges.length === 1) {
+    return true;
+  }
+
+  const mainIndex =
+    (selection.mainIndex + (forward ? 1 : -1)) % selection.ranges.length;
+
+  view.dispatch({
+    selection: EditorSelection.create(selection.ranges, mainIndex),
+  });
+}
+
 export function cmdCount(mode: NonInsertMode) {
   return mode.count ?? 1;
 }
@@ -819,4 +899,20 @@ function nextClusterBreak(doc: Text, pos: number, forward: boolean) {
   }
 
   return findClusterBreak(line.text, pos - line.from, forward) + line.from;
+}
+
+export function mapSel(
+  selection: EditorSelection,
+  mapper: (range: SelectionRange) => SelectionRange
+) {
+  if (selection.ranges.length === 1) {
+    const mapped = mapper(selection.main);
+
+    return EditorSelection.single(mapped.anchor, mapped.head);
+  }
+
+  return EditorSelection.create(
+    selection.ranges.map(mapper),
+    selection.mainIndex
+  );
 }

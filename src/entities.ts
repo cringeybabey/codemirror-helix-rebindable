@@ -15,6 +15,12 @@ export const enum MinorMode {
   RightBracket = 8,
 }
 
+export const enum SearchMode {
+  Normal,
+  Global,
+  Selection,
+}
+
 export type ModeState =
   | {
       type: ModeType.Insert;

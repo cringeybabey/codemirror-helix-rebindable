@@ -360,6 +360,6 @@ function configFromStorage() {
 
 function updateDebug(el: Debug, view: EditorView) {
   el.registers = view.state.field(codemirror.registersField);
-  el.selection = view.state.selection.main;
+  el.selection = view.state.selection;
   el.history = view.state.field(codemirror.historyField);
 }

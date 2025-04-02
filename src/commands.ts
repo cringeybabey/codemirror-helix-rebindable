@@ -712,7 +712,10 @@ export function paste(
 
   yanked ??= "";
 
-  const spec = { from: range.to, insert: yanked.toString().repeat(count) };
+  const spec = {
+    from: before ? range.from : range.to,
+    insert: yanked.toString().repeat(count),
+  };
 
   const change = view.state.changes(spec);
 

@@ -377,10 +377,13 @@ const helixCommandBindings: {
       const selection = view.state.selection.main;
 
       view.dispatch({
-        effects: yankEffect.of([
-          `"`,
-          view.state.doc.slice(selection.from, selection.to),
-        ]),
+        effects: [
+          yankEffect.of([
+            `"`,
+            view.state.doc.slice(selection.from, selection.to),
+          ]),
+          MODE_EFF.NORMAL,
+        ],
       });
 
       getCommandPanel(view).showMessage('yanked 1 selection to register "');
@@ -452,7 +455,7 @@ const helixCommandBindings: {
       command(view, mode) {
         const yanked = view.state.field(registersField);
 
-        paste(view, yanked[`"`], false, cmdCount(mode));
+        paste(view, yanked[`"`], true, cmdCount(mode));
       },
     },
     ["p"]: {
@@ -460,7 +463,7 @@ const helixCommandBindings: {
       command(view, mode) {
         const yanked = view.state.field(registersField);
 
-        paste(view, yanked[`"`], true, cmdCount(mode));
+        paste(view, yanked[`"`], false, cmdCount(mode));
       },
     },
     ["R"]: {
@@ -1188,7 +1191,7 @@ const helixCommandBindings: {
 
         navigator.clipboard
           .readText()
-          .then((yanked) => paste(view, yanked, true, 1, false));
+          .then((yanked) => paste(view, yanked, false, 1, false));
       },
     },
     ["P"]: {
@@ -1198,7 +1201,7 @@ const helixCommandBindings: {
 
         navigator.clipboard
           .readText()
-          .then((yanked) => paste(view, yanked, false, 1, false));
+          .then((yanked) => paste(view, yanked, true, 1, false));
       },
     },
     ["R"]: {

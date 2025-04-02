@@ -109,6 +109,18 @@ const cases: Case[] = [
       text: "hello world\n\nhelix rocks",
     },
   ],
+  [
+    "yank and paste after",
+    "hello\nworld",
+    ["v", "g", "l", "y", "g", "h", "j", "l", "p"],
+    "hello\nwohellorld",
+  ],
+  [
+    "yank and paste before",
+    "hello\nworld",
+    ["x", "_", "y", "Alt-;", ";", "j", "l", "P"],
+    "hello\nwhelloorld",
+  ],
 ];
 
 describe("codemirror-helix", () => {

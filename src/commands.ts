@@ -120,11 +120,13 @@ export function removeText(
   yank ??= true;
 
   if (yank) {
-    // TODO: registers per cursor
-    const selection = view.state.selection.main;
-
     effects.push(
-      yankEffect.of([`"`, view.state.doc.slice(selection.from, selection.to)])
+      yankEffect.of([
+        `"`,
+        view.state.selection.ranges.map((range) =>
+          view.state.doc.slice(range.from, range.to)
+        ),
+      ])
     );
   }
 
@@ -701,30 +703,70 @@ export function changeCase(view: ViewLike, upper?: boolean) {
   );
 }
 
+export function yanksForSelection(
+  selection: EditorSelection,
+  yank: Array<string | Text>
+) {
+  if (selection.ranges.length === yank.length) {
+    return yank;
+  }
+
+  if (selection.ranges.length < yank.length) {
+    return yank.slice(0, selection.ranges.length);
+  }
+
+  const last = yank.at(-1) ?? "";
+
+  const copy = [...yank];
+
+  for (let i = yank.length; i < selection.ranges.length; i++) {
+    copy[i] = last;
+  }
+
+  return copy;
+}
+
 export function paste(
   view: ViewLike,
-  yanked: string | Text | undefined,
+  yanked: Array<string | Text> | undefined,
   before: boolean,
   count: number,
   reset = true
 ) {
-  const range = view.state.selection.main;
+  const { selection } = view.state;
 
-  yanked ??= "";
+  yanked ??= [""];
 
-  const spec = {
-    from: before ? range.from : range.to,
-    insert: yanked.toString().repeat(count),
-  };
+  const yanks = yanksForSelection(selection, yanked);
 
-  const change = view.state.changes(spec);
+  const specs = yanks.map((yank, i) => ({
+    from: before ? selection.ranges[i].from : selection.ranges[i].to,
+    insert: yank.toString().repeat(count),
+  }));
+
+  const { ranges } = yanks.reduce(
+    (acc, yank, i) => {
+      let length = yank.length;
+      let range = selection.ranges[i];
+      const anchor = (before ? range.from : range.to) + acc.offset;
+
+      acc.ranges.push(EditorSelection.range(anchor, anchor + length));
+      acc.offset += length;
+
+      return acc;
+    },
+    {
+      ranges: [] as SelectionRange[],
+      offset: 0,
+    }
+  );
+
+  const change = view.state.changes(specs);
 
   view.dispatch(
     { changes: change },
     {
-      selection: before
-        ? { anchor: range.to, head: range.to + yanked.length }
-        : { anchor: range.from, head: range.from + yanked.length },
+      selection: EditorSelection.create(ranges, selection.mainIndex),
       sequential: true,
     },
     reset ? { effects: MODE_EFF.NORMAL } : {}
@@ -838,7 +880,10 @@ export function rotateSelection(view: EditorView, forward: boolean) {
     (selection.mainIndex + (forward ? 1 : -1)) % selection.ranges.length;
 
   view.dispatch({
-    selection: EditorSelection.create(selection.ranges, mainIndex),
+    selection: EditorSelection.create(
+      selection.ranges,
+      mainIndex + (mainIndex < 0 ? selection.ranges.length : 0)
+    ),
   });
 }
 

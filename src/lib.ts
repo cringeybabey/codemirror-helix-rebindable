@@ -100,6 +100,7 @@ import {
   mapSel,
   rotateSelection,
   changeNumber,
+  yanksForSelection,
 } from "./commands";
 import { backwardsSearch } from "./search";
 
@@ -211,7 +212,7 @@ function startSearch(view: EditorView, mode: SearchMode) {
       // TODO: previous value
       if (input != null) {
         view.dispatch({
-          effects: yankEffect.of(["/", input]),
+          effects: yankEffect.of(["/", [input]]),
         });
       }
 
@@ -374,13 +375,15 @@ const helixCommandBindings: {
       getCommandPanel(view).showCommandInput();
     },
     ["y"](view) {
-      const selection = view.state.selection.main;
+      const { selection } = view.state;
 
       view.dispatch({
         effects: [
           yankEffect.of([
             `"`,
-            view.state.doc.slice(selection.from, selection.to),
+            selection.ranges.map((range) =>
+              view.state.doc.slice(range.from, range.to)
+            ),
           ]),
           MODE_EFF.NORMAL,
         ],
@@ -471,13 +474,30 @@ const helixCommandBindings: {
       command(view, mode) {
         const contents = view.state.field(registersField)[`"`] ?? "";
         const count = cmdCount(mode);
-        const replacement =
-          count === 1 ? contents : contents.toString().repeat(count);
+        const yanks = yanksForSelection(view.state.selection, contents);
 
-        const tr = view.state.replaceSelection(replacement);
-        tr.effects = MODE_EFF.NORMAL;
+        const replacements =
+          count === 1
+            ? yanks
+            : yanks.map((yank) => yank.toString().repeat(count));
 
-        view.dispatch(tr);
+        const byIndex = new Map(
+          view.state.selection.ranges.map((range, i) => [range, i])
+        );
+
+        const tr = view.state.changeByRange((range) => ({
+          range,
+          changes: {
+            from: range.from,
+            to: range.to,
+            insert: replacements[byIndex.get(range)!],
+          },
+        }));
+
+        view.dispatch({
+          ...tr,
+          effects: [...tr.effects, MODE_EFF.NORMAL],
+        });
       },
     },
     ["r"]: {
@@ -930,18 +950,19 @@ const helixCommandBindings: {
       },
     },
     ["*"](view) {
-      const selection = view.state.selection.main;
+      const yanked = new Set(
+        view.state.selection.ranges.map((range) =>
+          escapeRegex(view.state.doc.sliceString(range.from, range.to))
+        )
+      );
+      const search = [...yanked].join("|");
 
-      const selected = view.state.doc
-        .slice(selection.from, selection.to)
-        .toString();
-
-      const yanked = escapeRegex(selected);
+      // FIXME: add \b
       view.dispatch({
-        effects: yankEffect.of(["/", yanked]),
+        effects: yankEffect.of(["/", [search]]),
       });
 
-      getCommandPanel(view).showMessage(`register '/' set to '${yanked}'`);
+      getCommandPanel(view).showMessage(`register '/' set to '${search}'`);
     },
     ["_"](view) {
       view.dispatch({
@@ -1191,7 +1212,7 @@ const helixCommandBindings: {
 
         navigator.clipboard
           .readText()
-          .then((yanked) => paste(view, yanked, false, 1, false));
+          .then((yanked) => paste(view, [yanked], false, 1, false));
       },
     },
     ["P"]: {
@@ -1201,7 +1222,7 @@ const helixCommandBindings: {
 
         navigator.clipboard
           .readText()
-          .then((yanked) => paste(view, yanked, true, 1, false));
+          .then((yanked) => paste(view, [yanked], true, 1, false));
       },
     },
     ["R"]: {

@@ -84,10 +84,13 @@ function minorModeStr(minor: MinorMode) {
 }
 
 export const yankEffect = StateEffect.define<
-  [string, string | Text] | { reset: Record<string, string | Text> }
+  | [string, Array<string | Text>]
+  | { reset: Record<string, Array<string | Text>> }
 >();
 
-export const registersField = StateField.define<Record<string, string | Text>>({
+export const registersField = StateField.define<
+  Record<string, Array<string | Text>>
+>({
   create() {
     return {};
   },

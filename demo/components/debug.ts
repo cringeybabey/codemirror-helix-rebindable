@@ -39,7 +39,9 @@ export class Debug extends HTMLElement {
       main.anchor <= main.head ? "➡️" : "⬅️"
     } ${main.to}${
       selection.ranges.length > 1
-        ? ` (plus ${selection.ranges.length - 1} more)`
+        ? ` at #${selection.mainIndex} (plus ${
+            selection.ranges.length - 1
+          } more)`
         : ""
     }`;
   }

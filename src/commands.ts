@@ -24,33 +24,9 @@ export const MODE_EFF = {
     type: ModeType.Normal,
     minor: MinorMode.Normal,
   }),
-  NORMAL_GOTO: modeEffect.of({
-    type: ModeType.Normal,
-    minor: MinorMode.Goto,
-  }),
-  NORMAL_MATCH: modeEffect.of({
-    type: ModeType.Normal,
-    minor: MinorMode.Match,
-  }),
-  NORMAL_SPACE: modeEffect.of({
-    type: ModeType.Normal,
-    minor: MinorMode.Space,
-  }),
   SELECT: modeEffect.of({
     type: ModeType.Select,
     minor: MinorMode.Normal,
-  }),
-  SELECT_GOTO: modeEffect.of({
-    type: ModeType.Select,
-    minor: MinorMode.Goto,
-  }),
-  SELECT_MATCH: modeEffect.of({
-    type: ModeType.Select,
-    minor: MinorMode.Match,
-  }),
-  SELECT_SPACE: modeEffect.of({
-    type: ModeType.Select,
-    minor: MinorMode.Space,
   }),
   INSERT: modeEffect.of({ type: ModeType.Insert }),
 };
@@ -725,13 +701,36 @@ export function yanksForSelection(
 
   return copy;
 }
+export function yank(view: EditorView, mode: NonInsertMode, register?: string) {
+  const { selection } = view.state;
+
+  register ??= mode.register ?? `"`;
+
+  view.dispatch({
+    effects: [
+      yankEffect.of([
+        register,
+        selection.ranges.map((range) =>
+          view.state.doc.slice(range.from, range.to)
+        ),
+      ]),
+      MODE_EFF.NORMAL,
+    ],
+  });
+
+  const total = selection.ranges.length;
+
+  return `yanked ${
+    total === 1 ? "1 selection" : `${total} selections`
+  } to register ${register}`;
+}
 
 export function paste(
   view: ViewLike,
   yanked: Array<string | Text> | undefined,
   before: boolean,
   count: number,
-  reset = true
+  { reset = true, select = true } = {}
 ) {
   const { selection } = view.state;
 
@@ -750,7 +749,11 @@ export function paste(
       let range = selection.ranges[i];
       const anchor = (before ? range.from : range.to) + acc.offset;
 
-      acc.ranges.push(EditorSelection.range(anchor, anchor + length));
+      acc.ranges.push(
+        select
+          ? EditorSelection.range(anchor, anchor + length)
+          : EditorSelection.cursor(anchor + length)
+      );
       acc.offset += length;
 
       return acc;
@@ -808,6 +811,7 @@ export function openLine(view: ViewLike, below: boolean) {
   let from: number;
   let cursor: number;
 
+  // FIXME: consider multiple selections
   const selection = cmSelToInternal(view.state.selection.main, view.state.doc);
 
   if (below) {
@@ -855,6 +859,7 @@ export function insertLine(view: ViewLike, below: boolean) {
   const count = mode.type === ModeType.Insert ? 1 : cmdCount(mode);
   const select = mode.type === ModeType.Select;
 
+  // FIXME: handle multiple selections
   const selection = view.state.selection.main;
 
   const line = view.state.doc.lineAt(below ? selection.to : selection.from);
@@ -899,6 +904,17 @@ export function resetCount(mode: NonInsertMode) {
 
 function rangeForward(range: SelectionRange) {
   return range.head > range.from;
+}
+
+export function fixAtomicRange(range: SelectionRange, doc: Text) {
+  if (rangeForward(range) || !atomicRange(range, doc)) {
+    return range;
+  }
+
+  return cloneRange(range, {
+    anchor: range.head,
+    head: range.anchor,
+  });
 }
 
 export function atomicRange(range: SelectionRange, doc: Text) {

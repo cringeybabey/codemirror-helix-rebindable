@@ -21,19 +21,23 @@ export const enum SearchMode {
   Selection,
 }
 
+type Expecting = {
+  minor: string;
+  callback(view: EditorView, char: string, metadata: any): void;
+  metadata: any;
+};
+
 export type ModeState =
   | {
       type: ModeType.Insert;
+      expecting?: Expecting;
     }
   | {
       type: ModeType.Normal | ModeType.Select;
       minor: MinorMode;
       count?: number;
-      expecting?: {
-        minor: string;
-        callback(view: EditorView, char: string, metadata: any): void;
-        metadata: any;
-      };
+      register?: string;
+      expecting?: Expecting;
     };
 
 export type NonInsertMode = Exclude<

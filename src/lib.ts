@@ -11,8 +11,6 @@ import {
   selectAll,
   selectDocEnd,
   selectDocStart,
-  selectGroupLeft,
-  selectGroupRight,
   selectParentSyntax,
   toggleComment,
 } from "@codemirror/commands";
@@ -56,7 +54,11 @@ import {
   historyField,
   modeEffect,
   modeField,
+  overwriteMode,
+  readClipboard,
+  readRegister,
   registersField,
+  resetMode,
   sameMode,
   sameModeState,
   syntaxHistoryEffect,
@@ -101,6 +103,8 @@ import {
   rotateSelection,
   changeNumber,
   yanksForSelection,
+  fixAtomicRange,
+  yank,
 } from "./commands";
 import { backwardsSearch } from "./search";
 
@@ -161,18 +165,14 @@ function startSearch(view: EditorView, mode: SearchMode) {
           }
         }
 
-        let newSelection =
-          selections.length === 0
-            ? initialSelection
-            : EditorSelection.create([
-                EditorSelection.range(selections[0].from, selections[0].to),
-              ]);
+        const newRanges = selections.map((sel) =>
+          EditorSelection.range(sel.from, sel.to)
+        );
 
-        for (const sel of selections.slice(1)) {
-          newSelection = newSelection.addRange(
-            EditorSelection.range(sel.from, sel.to)
-          );
-        }
+        const newSelection =
+          newRanges.length === 0
+            ? initialSelection
+            : EditorSelection.create(newRanges, 0);
 
         view.dispatch({
           selection: newSelection,
@@ -262,7 +262,7 @@ type ExplicitCommandDef<M> = SimpleCommand<M> | CheckpointCommandDef<M>;
 type CommandDef<M> = ExplicitCommandDef<M> | string;
 
 const helixCommandBindings: {
-  insert: Record<string, SimpleCommand<undefined>>;
+  insert: Record<string, SimpleCommand<ModeState & { type: ModeType.Insert }>>;
   normal: Record<string, CommandDef<NormalLikeMode>>;
   goto: Record<string, CommandDef<NonInsertMode>>;
   match: Record<string, CommandDef<NonInsertMode>>;
@@ -284,7 +284,15 @@ const helixCommandBindings: {
     // FIXME: stuff like Shift-<arrow> doesn't quite work with `editor.cursor-shape.insert === "block"`.
     ArrowLeft: cursorCharLeft,
     ArrowRight: cursorCharRight,
-    Escape(view) {
+    Escape(view, mode) {
+      if (mode.expecting) {
+        view.dispatch({
+          effects: MODE_EFF.INSERT,
+        });
+
+        return true;
+      }
+
       view.dispatch({
         effects: [
           MODE_EFF.NORMAL,
@@ -293,6 +301,26 @@ const helixCommandBindings: {
         selection: mapSel(view.state.selection, (range) =>
           range.empty ? internalSelToCM(range, view.state.doc) : range
         ),
+      });
+    },
+    ["Ctrl-r"](view) {
+      view.dispatch({
+        effects: modeEffect.of({
+          type: ModeType.Insert,
+          expecting: {
+            minor: "<C-r>",
+            callback(view, char, _metadata) {
+              const yanked = readRegister(view.state, char);
+
+              paste(view, yanked, false, 1, { select: false, reset: false });
+
+              view.dispatch({
+                effects: MODE_EFF.INSERT,
+              });
+            },
+            metadata: undefined,
+          },
+        }),
       });
     },
   },
@@ -305,6 +333,7 @@ const helixCommandBindings: {
         mode.type === ModeType.Normal &&
         mode.minor === MinorMode.Normal &&
         mode.expecting == null &&
+        mode.register == null &&
         mode.count == null
       ) {
         return true;
@@ -348,7 +377,7 @@ const helixCommandBindings: {
       }
 
       view.dispatch({
-        selection: EditorSelection.create(selections),
+        selection: EditorSelection.create(selections, 0),
       });
     },
     [","](view) {
@@ -369,27 +398,13 @@ const helixCommandBindings: {
     ...countCommands,
     [":"](view, mode) {
       view.dispatch({
-        effects: modeEffect.of({ ...mode, count: undefined }),
+        effects: resetMode(mode),
       });
 
       getCommandPanel(view).showCommandInput();
     },
-    ["y"](view) {
-      const { selection } = view.state;
-
-      view.dispatch({
-        effects: [
-          yankEffect.of([
-            `"`,
-            selection.ranges.map((range) =>
-              view.state.doc.slice(range.from, range.to)
-            ),
-          ]),
-          MODE_EFF.NORMAL,
-        ],
-      });
-
-      getCommandPanel(view).showMessage('yanked 1 selection to register "');
+    ["y"](view, mode) {
+      getCommandPanel(view).showMessage(yank(view, mode));
     },
     ["a"]: {
       checkpoint: "temp",
@@ -456,23 +471,28 @@ const helixCommandBindings: {
     ["P"]: {
       checkpoint: true,
       command(view, mode) {
-        const yanked = view.state.field(registersField);
+        const yanked = readRegister(view.state, mode.register);
 
-        paste(view, yanked[`"`], true, cmdCount(mode));
+        paste(view, yanked, true, cmdCount(mode));
       },
     },
     ["p"]: {
       checkpoint: true,
       command(view, mode) {
-        const yanked = view.state.field(registersField);
+        const yanked = readRegister(view.state, mode.register);
 
-        paste(view, yanked[`"`], false, cmdCount(mode));
+        paste(view, yanked, false, cmdCount(mode));
       },
     },
     ["R"]: {
       checkpoint: true,
       command(view, mode) {
-        const contents = view.state.field(registersField)[`"`] ?? "";
+        const contents = readRegister(view.state, mode.register);
+
+        if (!contents) {
+          return true;
+        }
+
         const count = cmdCount(mode);
         const yanks = yanksForSelection(view.state.selection, contents);
 
@@ -485,14 +505,26 @@ const helixCommandBindings: {
           view.state.selection.ranges.map((range, i) => [range, i])
         );
 
-        const tr = view.state.changeByRange((range) => ({
-          range,
-          changes: {
-            from: range.from,
-            to: range.to,
-            insert: replacements[byIndex.get(range)!],
-          },
-        }));
+        const tr = view.state.changeByRange((range) => {
+          const insert = replacements[byIndex.get(range)!];
+
+          if (!insert) {
+            return { range };
+          }
+
+          // FIXME: fix ranges
+          return {
+            range: EditorSelection.range(
+              range.from,
+              range.from + insert.length
+            ),
+            changes: {
+              from: range.from,
+              to: range.to,
+              insert: insert,
+            },
+          };
+        });
 
         view.dispatch({
           ...tr,
@@ -516,30 +548,14 @@ const helixCommandBindings: {
       },
     },
     ["w"](view, mode) {
-      if (mode.type === ModeType.Normal) {
-        view.dispatch({
-          selection: mapSel(view.state.selection, (range) =>
-            EditorSelection.range(range.to, range.to)
-          ),
-        });
-      }
-
-      for (let _i = 0; _i < cmdCount(mode); _i++) {
-        selectGroupRight(view);
-      }
+      // FIXME: this is a temporary hack to have something
+      moveByGroup(view, mode, true);
+    },
+    ["e"](view, mode) {
+      moveByGroup(view, mode, true);
     },
     ["b"](view, mode) {
-      if (mode.type === ModeType.Normal) {
-        view.dispatch({
-          selection: mapSel(view.state.selection, (range) =>
-            EditorSelection.range(range.to, range.to)
-          ),
-        });
-      }
-
-      for (let _i = 0; _i < cmdCount(mode); _i++) {
-        selectGroupLeft(view);
-      }
+      moveByGroup(view, mode, false);
     },
     ["v"](view, mode) {
       view.dispatch({
@@ -548,24 +564,18 @@ const helixCommandBindings: {
       });
     },
     ["g"](view, mode) {
-      const isNormal = mode.type === ModeType.Normal;
-
       view.dispatch({
-        effects: isNormal ? MODE_EFF.NORMAL_GOTO : MODE_EFF.SELECT_GOTO,
+        effects: overwriteMode(mode, { minor: MinorMode.Goto }),
       });
     },
     ["Space"](view, mode) {
-      const isNormal = mode.type === ModeType.Normal;
-
       view.dispatch({
-        effects: isNormal ? MODE_EFF.NORMAL_SPACE : MODE_EFF.SELECT_SPACE,
+        effects: overwriteMode(mode, { minor: MinorMode.Space }),
       });
     },
     ["m"](view, mode) {
-      const isNormal = mode.type === ModeType.Normal;
-
       view.dispatch({
-        effects: isNormal ? MODE_EFF.NORMAL_MATCH : MODE_EFF.SELECT_MATCH,
+        effects: overwriteMode(mode, { minor: MinorMode.Match }),
       });
     },
     ["i"]: {
@@ -998,6 +1008,7 @@ const helixCommandBindings: {
     ["J"]: {
       checkpoint: true,
       command(view) {
+        // FIXME: multiple
         const selection = view.state.selection.main;
 
         const { doc } = view.state;
@@ -1071,17 +1082,26 @@ const helixCommandBindings: {
     },
     ["["](view, mode) {
       view.dispatch({
-        effects: modeEffect.of({
-          type: mode.type,
-          minor: MinorMode.LeftBracket,
-        }),
+        effects: overwriteMode(mode, { minor: MinorMode.LeftBracket }),
       });
     },
     ["]"](view, mode) {
       view.dispatch({
-        effects: modeEffect.of({
-          type: mode.type,
-          minor: MinorMode.RightBracket,
+        effects: overwriteMode(mode, { minor: MinorMode.RightBracket }),
+      });
+    },
+    [`"`](view, mode) {
+      view.dispatch({
+        effects: overwriteMode(mode, {
+          expecting: {
+            minor: `"`,
+            metadata: undefined,
+            callback(view, char, _metadata) {
+              view.dispatch({
+                effects: modeEffect.of({ ...mode, register: char }),
+              });
+            },
+          },
         }),
       });
     },
@@ -1192,27 +1212,17 @@ const helixCommandBindings: {
     },
   },
   space: {
-    ["y"](view) {
-      const selection = view.state.selection.main;
-
-      navigator.clipboard.writeText(
-        view.state.doc.slice(selection.from, selection.to).toString()
-      );
-
-      getCommandPanel(view).showMessage("yanked 1 selection to register +");
-
-      view.dispatch({
-        effects: MODE_EFF.NORMAL,
-      });
+    ["y"](view, mode) {
+      getCommandPanel(view).showMessage(yank(view, mode, "+"));
     },
     ["p"]: {
       checkpoint: true,
       command(view) {
         view.dispatch({ effects: MODE_EFF.NORMAL });
 
-        navigator.clipboard
-          .readText()
-          .then((yanked) => paste(view, [yanked], false, 1, false));
+        readClipboard(view.state).then((yanked) =>
+          paste(view, yanked, false, 1, { reset: false })
+        );
       },
     },
     ["P"]: {
@@ -1220,17 +1230,19 @@ const helixCommandBindings: {
       command(view) {
         view.dispatch({ effects: MODE_EFF.NORMAL });
 
-        navigator.clipboard
-          .readText()
-          .then((yanked) => paste(view, [yanked], true, 1, false));
+        readClipboard(view.state).then((yanked) =>
+          paste(view, yanked, true, 1, { reset: false })
+        );
       },
     },
+    // FIXME: align with the non-clipboard one
     ["R"]: {
       checkpoint: true,
       command(view) {
         view.dispatch({ effects: MODE_EFF.NORMAL });
-        navigator.clipboard.readText().then((yanked) => {
-          const tr = view.state.replaceSelection(yanked);
+
+        readClipboard(view.state).then((yanked) => {
+          const tr = view.state.replaceSelection(yanked[0]);
           view.dispatch(tr);
         });
       },
@@ -1293,6 +1305,40 @@ const helixCommandBindings: {
   },
 };
 
+function moveByGroup(view: EditorView, mode: NormalLikeMode, forward: boolean) {
+  const normal = mode.type === ModeType.Normal;
+
+  const tr = view.state.changeByRange((range) => {
+    let nextAnchor = normal ? range.head : range.anchor;
+    let nextHead = view.moveByGroup(
+      EditorSelection.cursor(range.head),
+      forward
+    ).anchor;
+
+    let fixed = fixAtomicRange(
+      EditorSelection.range(nextAnchor, nextHead),
+      view.state.doc
+    );
+    if (nextAnchor === nextHead || fixed.eq(range)) {
+      nextHead = view.moveByGroup(
+        EditorSelection.cursor(range.anchor),
+        forward
+      ).anchor;
+    }
+
+    fixed = fixAtomicRange(
+      EditorSelection.range(nextAnchor, nextHead),
+      view.state.doc
+    );
+
+    return {
+      range: fixed,
+    };
+  });
+
+  view.dispatch(tr);
+}
+
 function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
   const allKeys = [
     ...new Set(
@@ -1344,7 +1390,7 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
 
   for (const key of allKeys) {
     const insertCommand = getExplicitCommand(key, keybindings.insert) as
-      | SimpleCommand<undefined>
+      | SimpleCommand<ModeState & { type: ModeType.Insert }>
       | undefined;
     const normalCommand = getExplicitCommand(key, keybindings.normal) as
       | ExplicitCommandDef<NormalLikeMode>
@@ -1375,7 +1421,7 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
 
       if (mode.type === ModeType.Insert) {
         if (insertCommand) {
-          return insertCommand(view, undefined) ?? true;
+          return insertCommand(view, mode) ?? true;
         } else {
           return false;
         }
@@ -1520,13 +1566,9 @@ const unhandledCommandsFilter = EditorState.transactionFilter.from(
 
 // TODO: this trick doesn't work with compositing. We have to
 // bite the bullet and let an external source of input take care of this.
-const inputHandler = EditorView.inputHandler.from(
+const expectingInputHandler = EditorView.inputHandler.from(
   modeField,
   (mode) => (view, _from, _to, text) => {
-    if (mode.type === ModeType.Insert) {
-      return false;
-    }
-
     if (mode.expecting) {
       mode.expecting.callback(view, text, mode.expecting.metadata);
       return true;
@@ -1536,7 +1578,7 @@ const inputHandler = EditorView.inputHandler.from(
   }
 );
 
-const updateListener = EditorView.updateListener.of((viewUpdate) => {
+const modeUpdateListener = EditorView.updateListener.of((viewUpdate) => {
   const { state, startState } = viewUpdate;
 
   const panel = getPanel(viewUpdate.view, statusPanel) as ReturnType<
@@ -1550,8 +1592,11 @@ const updateListener = EditorView.updateListener.of((viewUpdate) => {
     const startExternalMode = toExternalMode(startMode);
     const externalMode = toExternalMode(mode);
 
-    if (startExternalMode !== externalMode) {
-      panel.setMode(externalMode);
+    if (
+      startExternalMode !== externalMode ||
+      (mode as NonInsertMode).register !== (startMode as NonInsertMode).register
+    ) {
+      panel.setMode(externalMode, (mode as NonInsertMode).register);
     }
   }
 
@@ -1621,6 +1666,17 @@ const externalCommandsFacet = Facet.define<
 export { externalCommandsFacet as externalCommands };
 
 /**
+ * Exposes the contents of a given register for external consumption
+ */
+function externalReadRegister(state: EditorState, register: string) {
+  const contents = readRegister(state, register);
+
+  return contents?.at(0);
+}
+
+export { externalReadRegister as readRegister };
+
+/**
  * Creates a snapshot of the extension state suitable to initialize
  * the extension later (see `init` and `globalInit`). Snapshots are JSON-serializable.
  *
@@ -1661,10 +1717,12 @@ export const commands = Facet.define<TypableCommand[], TypableCommand[]>({
   },
 });
 
+const exportedResetMode: StateEffect<any> = MODE_EFF.NORMAL;
+
 /**
  * An effect to reset the mode of an editor.
  */
-export const resetMode: StateEffect<any> = MODE_EFF.NORMAL;
+export { exportedResetMode as resetMode };
 
 /**
  * A command that can be typed in command mode `:`.
@@ -1755,7 +1813,7 @@ export function helix(options: Options = {}): Extension {
     searchFacet.from(registersField, (registers) => registers["/"]?.toString()),
     unhandledCommandsFilter,
     selectByClickFilter,
-    inputHandler,
+    expectingInputHandler,
     EditorState.allowMultipleSelections.of(true),
     EditorState.transactionFilter.from(syntaxHistoryField, ({ selections }) =>
       selections.length === 0
@@ -1780,7 +1838,7 @@ export function helix(options: Options = {}): Extension {
 
       return drawCursorMark(state.selection, state.doc);
     }),
-    updateListener,
+    modeUpdateListener,
     showPanel.of(statusPanel),
     showPanel.of(commandPanel),
     syntaxHistoryField,

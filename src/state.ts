@@ -8,6 +8,7 @@ import {
   TransactionSpec,
 } from "@codemirror/state";
 import { MinorMode, ModeState, ModeType, NonInsertMode } from "./entities";
+import { pathRegister } from "./lib";
 
 export const modeEffect = StateEffect.define<ModeState>();
 
@@ -113,6 +114,11 @@ export function readRegister(state: EditorState, register?: string) {
       return state.selection.ranges.map((range) =>
         state.sliceDoc(range.from, range.to)
       );
+    }
+    case "%": {
+      const path = state.facet(pathRegister);
+
+      return path != null ? [path] : [];
     }
     default: {
       return state.field(registersField)[register ?? `"`] as

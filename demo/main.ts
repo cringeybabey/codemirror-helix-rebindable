@@ -7,6 +7,7 @@ import { Debug } from "./components/debug";
 
 // @ts-ignore
 import fileNames from "folder:..?names";
+import { pathRegister } from "../src/lib";
 
 const filePickerOptions = fileNames.map((value: string) => ({ value }));
 
@@ -126,7 +127,7 @@ async function createViewPanel(file: string) {
   tabPanel.name = file;
   tabGroup.append(tabPanel);
 
-  const view = createView(
+  const view = await createView(
     file,
     getPersistedFile(file) ?? (await getFiles())[file],
     tabPanel
@@ -141,11 +142,12 @@ async function createViewPanel(file: string) {
   return view;
 }
 
-function createView(file: string, doc: string, parent: HTMLElement) {
+async function createView(file: string, doc: string, parent: HTMLElement) {
   const view = new codemirror.EditorView({
     state: codemirror.EditorState.create({
       doc,
       extensions: [
+        pathRegister.of(file),
         codemirror.externalCommands.of({
           buffer_picker() {
             const picker = createPicker(view, (value) => {
@@ -228,9 +230,7 @@ function createView(file: string, doc: string, parent: HTMLElement) {
         }),
         debugPlugin().extension,
         codemirror.syntaxHighlighting(codemirror.defaultHighlightStyle),
-        codemirror.javascript({
-          typescript: true,
-        }),
+        ...(await chooseSyntax(file)),
         codemirror.lineNumbers(),
         codemirror.commands.of([
           {
@@ -362,4 +362,37 @@ function updateDebug(el: Debug, view: EditorView) {
   el.registers = view.state.field(codemirror.registersField);
   el.selection = view.state.selection;
   el.history = view.state.field(codemirror.historyField);
+}
+
+async function chooseSyntax(file: string) {
+  const ext = file.split(".").at(-1);
+
+  switch (ext) {
+    case "ts": {
+      return [
+        codemirror.javascript({
+          typescript: true,
+        }),
+      ];
+    }
+    case "html": {
+      return import("@codemirror/lang-html").then(({ html }) => [html()]);
+    }
+    case "md": {
+      return import("@codemirror/lang-markdown").then(({ markdown }) => [
+        markdown(),
+      ]);
+    }
+    case "css": {
+      return import("@codemirror/lang-css").then(({ css }) => [css()]);
+    }
+    case "yml": {
+      return import("@codemirror/lang-yaml").then(({ yaml }) => [yaml()]);
+    }
+    case "json": {
+      return import("@codemirror/lang-json").then(({ json }) => [json()]);
+    }
+  }
+
+  return [];
 }

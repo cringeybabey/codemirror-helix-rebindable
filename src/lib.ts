@@ -1667,6 +1667,7 @@ export { externalCommandsFacet as externalCommands };
 
 /**
  * Exposes the contents of a given register for external consumption
+ * for e.g. reading registers in external UI elements, suck as pickers.
  */
 function externalReadRegister(state: EditorState, register: string) {
   const contents = readRegister(state, register);
@@ -1675,6 +1676,18 @@ function externalReadRegister(state: EditorState, register: string) {
 }
 
 export { externalReadRegister as readRegister };
+
+/**
+ * Allows the embedder to provide the "path" i.e. the contents of the `%` register.
+ */
+export const pathRegister = Facet.define<
+  string | undefined,
+  string | undefined
+>({
+  combine(values) {
+    return values.at(-1);
+  },
+});
 
 /**
  * Creates a snapshot of the extension state suitable to initialize

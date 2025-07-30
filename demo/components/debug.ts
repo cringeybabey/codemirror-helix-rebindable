@@ -1,4 +1,4 @@
-import { type SelectionRange } from "@codemirror/state";
+import { EditorSelection } from "@codemirror/state";
 
 declare global {
   interface HTMLElementTagNameMap {
@@ -32,10 +32,18 @@ export class Debug extends HTMLElement {
       .join("\n");
   }
 
-  set selection(selection: SelectionRange) {
-    this.#selection.textContent = `${selection.from} ${
-      selection.anchor <= selection.head ? "➡️" : "⬅️"
-    } ${selection.to}`;
+  set selection(selection: EditorSelection) {
+    const main = selection.main;
+
+    this.#selection.textContent = `${main.from} ${
+      main.anchor <= main.head ? "➡️" : "⬅️"
+    } ${main.to}${
+      selection.ranges.length > 1
+        ? ` at #${selection.mainIndex} (plus ${
+            selection.ranges.length - 1
+          } more)`
+        : ""
+    }`;
   }
 
   set history(history: any) {

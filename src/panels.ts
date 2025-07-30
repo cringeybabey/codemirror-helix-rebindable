@@ -1,8 +1,8 @@
 import { EditorView, Panel } from "@codemirror/view";
 import { EditorSelection, FacetReader } from "@codemirror/state";
 import type { TypableCommand } from "./lib";
-import { modeStatus } from "./state";
-import { ModeState } from "./entities";
+import { modeStatus, readRegister, yankEffect } from "./state";
+import { ModeState, SearchMode } from "./entities";
 
 export const panelStyles = EditorView.theme({
   ".cm-hx-status-panel": {
@@ -57,7 +57,7 @@ export class CommandPanel implements Panel {
   constructor(
     private view: EditorView,
     private commandFacet: FacetReader<TypableCommand[]>,
-    private startSearch: (global: boolean) => {
+    private startSearch: (mode: SearchMode) => {
       onInput(input: string): void;
       onClose(accept: boolean): CommandPanelMessage | void;
       init: string;
@@ -94,10 +94,13 @@ export class CommandPanel implements Panel {
     $style(this.minorCommand, { minWidth: "8em", textAlign: "center " });
   }
 
-  showSearchInput(global = false) {
-    const input = this.searchInput(global);
+  showSearchInput(mode = SearchMode.Normal) {
+    const input = this.searchInput(mode);
 
-    this.showInput(input, global ? "global-search:" : "search:");
+    this.showInput(
+      input,
+      mode === SearchMode.Global ? "global-search:" : "search:"
+    );
   }
 
   showCommandInput() {
@@ -124,12 +127,18 @@ export class CommandPanel implements Panel {
     onInput,
     onClose,
     placeholder,
+    onKeyDown,
   }: {
     onInput: (value: string) => void;
     onClose: (commit: boolean, value: string) => void;
+    onKeyDown?: (event: KeyboardEvent) => void;
     placeholder?: string;
   }) {
     const input = $el("input") as HTMLInputElement;
+
+    if (onKeyDown) {
+      input.addEventListener("keydown", onKeyDown);
+    }
 
     if (placeholder) {
       input.placeholder = placeholder;
@@ -175,10 +184,43 @@ export class CommandPanel implements Panel {
 
     const isNumber = (cmd: string) => /^\d+$/.test(cmd);
 
+    let readingRegister = false;
+
     // FIXME: tab completion
-    return this.createInput({
+    const input = this.createInput({
+      placeholder: readRegister(view.state, ":")?.at(0)?.toString(),
+      onKeyDown(e) {
+        if (e.isComposing) {
+          return;
+        }
+
+        if (e.key === "r" && e.ctrlKey) {
+          readingRegister = true;
+        } else if (readingRegister && e.key === "Escape") {
+          readingRegister = false;
+          // FIXME: length=1 is sort of fake
+        } else if (readingRegister && e.key.length === 1) {
+          readingRegister = false;
+
+          input.value +=
+            readRegister(view.state, e.key)?.at(0)?.toString() ?? "";
+        } else if (!readingRegister) {
+          return;
+        }
+
+        e.stopPropagation();
+        e.preventDefault();
+      },
       onClose: (commit, value) => {
         this.hidePopup();
+
+        if (commit && value) {
+          view.dispatch({
+            effects: yankEffect.of([":", [value]]),
+          });
+        } else if (commit) {
+          value = readRegister(view.state, ":")?.at(0)?.toString() ?? "";
+        }
 
         const [cmd, ...args] = value.split(/ +/);
 
@@ -263,6 +305,8 @@ export class CommandPanel implements Panel {
         this.showPopup(options, match);
       },
     });
+
+    return input;
   }
 
   showError(message: string) {
@@ -361,8 +405,8 @@ export class CommandPanel implements Panel {
     });
   }
 
-  private searchInput(global: boolean) {
-    const search = this.startSearch(global);
+  private searchInput(mode: SearchMode) {
+    const search = this.startSearch(mode);
 
     return this.createInput({
       placeholder: search.init,
@@ -399,6 +443,9 @@ export function statusPanel(view: EditorView) {
   mode.textContent = "NOR";
   dom.append(mode);
 
+  const register = $el("span");
+  dom.append(register);
+
   const pos = $el("span");
 
   dom.append(pos);
@@ -413,8 +460,10 @@ export function statusPanel(view: EditorView) {
 
   return {
     dom,
-    setMode(modeStr: string) {
+    setMode(modeStr: string, activeRegister?: string) {
       mode.textContent = modeStr;
+
+      register.textContent = activeRegister ? `reg=${activeRegister}` : "";
     },
     setLineCol,
   };

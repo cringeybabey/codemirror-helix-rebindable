@@ -11,8 +11,6 @@ import {
   selectAll,
   selectDocEnd,
   selectDocStart,
-  selectGroupLeft,
-  selectGroupRight,
   selectParentSyntax,
   toggleComment,
 } from "@codemirror/commands";
@@ -21,16 +19,17 @@ import {
   EditorState,
   Extension,
   Facet,
-  SelectionRange,
-  StateEffect,
-  Text,
+  type Range,
+  type SelectionRange,
+  type StateEffect,
+  type Text,
   Transaction,
-  TransactionSpec,
+  type TransactionSpec,
 } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
-  KeyBinding,
+  type KeyBinding,
   ViewPlugin,
   WidgetType,
   drawSelection,
@@ -44,8 +43,9 @@ import {
   MinorMode,
   ModeState,
   ModeType,
-  NonInsertMode,
-  NormalLikeMode,
+  type NonInsertMode,
+  type NormalLikeMode,
+  SearchMode,
 } from "./entities";
 
 import {
@@ -54,7 +54,11 @@ import {
   historyField,
   modeEffect,
   modeField,
+  overwriteMode,
+  readClipboard,
+  readRegister,
   registersField,
+  resetMode,
   sameMode,
   sameModeState,
   syntaxHistoryEffect,
@@ -95,10 +99,17 @@ import {
   setFindMode,
   surround,
   withHelixSelection,
+  mapSel,
+  rotateSelection,
+  changeNumber,
+  yanksForSelection,
+  fixAtomicRange,
+  yank,
+  extendToDelimiters,
 } from "./commands";
 import { backwardsSearch } from "./search";
 
-function startSearch(view: EditorView, global: boolean) {
+function startSearch(view: EditorView, mode: SearchMode) {
   const initialScroll = view.scrollSnapshot();
   const initialSelection = view.state.selection;
 
@@ -123,11 +134,51 @@ function startSearch(view: EditorView, global: boolean) {
         return;
       }
 
-      if (!query?.valid) {
+      if (!query?.valid && mode !== SearchMode.Selection) {
         return;
       }
 
-      if (global) {
+      if (mode === SearchMode.Global) {
+        return;
+      }
+
+      if (mode === SearchMode.Selection) {
+        if (!query.valid) {
+          if (!input) {
+            view.dispatch({
+              selection: initialSelection,
+            });
+          }
+          return;
+        }
+
+        const selections = [];
+
+        for (const sel of initialSelection.ranges) {
+          const match = query.getCursor(view.state, sel.from, sel.to);
+
+          for (const matched of {
+            [Symbol.iterator]() {
+              return match;
+            },
+          }) {
+            selections.push(matched);
+          }
+        }
+
+        const newRanges = selections.map((sel) =>
+          EditorSelection.range(sel.from, sel.to)
+        );
+
+        const newSelection =
+          newRanges.length === 0
+            ? initialSelection
+            : EditorSelection.create(newRanges, 0);
+
+        view.dispatch({
+          selection: newSelection,
+        });
+
         return;
       }
 
@@ -162,11 +213,11 @@ function startSearch(view: EditorView, global: boolean) {
       // TODO: previous value
       if (input != null) {
         view.dispatch({
-          effects: yankEffect.of(["/", input]),
+          effects: yankEffect.of(["/", [input]]),
         });
       }
 
-      if (global) {
+      if (mode === SearchMode.Global) {
         const externalCommands = view.state.facet(externalCommandsFacet);
         const query = input || view.state.field(registersField)["/"];
 
@@ -212,7 +263,7 @@ type ExplicitCommandDef<M> = SimpleCommand<M> | CheckpointCommandDef<M>;
 type CommandDef<M> = ExplicitCommandDef<M> | string;
 
 const helixCommandBindings: {
-  insert: Record<string, SimpleCommand<undefined>>;
+  insert: Record<string, SimpleCommand<ModeState & { type: ModeType.Insert }>>;
   normal: Record<string, CommandDef<NormalLikeMode>>;
   goto: Record<string, CommandDef<NonInsertMode>>;
   match: Record<string, CommandDef<NonInsertMode>>;
@@ -234,11 +285,13 @@ const helixCommandBindings: {
     // FIXME: stuff like Shift-<arrow> doesn't quite work with `editor.cursor-shape.insert === "block"`.
     ArrowLeft: cursorCharLeft,
     ArrowRight: cursorCharRight,
-    Escape(view) {
-      let selection = view.state.selection.main;
+    Escape(view, mode) {
+      if (mode.expecting) {
+        view.dispatch({
+          effects: MODE_EFF.INSERT,
+        });
 
-      if (selection.empty) {
-        selection = internalSelToCM(selection, view.state.doc);
+        return true;
       }
 
       view.dispatch({
@@ -246,7 +299,29 @@ const helixCommandBindings: {
           MODE_EFF.NORMAL,
           historyEffect.of({ type: "commit", state: view.state }),
         ],
-        selection,
+        selection: mapSel(view.state.selection, (range) =>
+          range.empty ? internalSelToCM(range, view.state.doc) : range
+        ),
+      });
+    },
+    ["Ctrl-r"](view) {
+      view.dispatch({
+        effects: modeEffect.of({
+          type: ModeType.Insert,
+          expecting: {
+            minor: "<C-r>",
+            callback(view, char, _metadata) {
+              const yanked = readRegister(view.state, char);
+
+              paste(view, yanked, false, 1, { select: false, reset: false });
+
+              view.dispatch({
+                effects: MODE_EFF.INSERT,
+              });
+            },
+            metadata: undefined,
+          },
+        }),
       });
     },
   },
@@ -259,6 +334,7 @@ const helixCommandBindings: {
         mode.type === ModeType.Normal &&
         mode.minor === MinorMode.Normal &&
         mode.expecting == null &&
+        mode.register == null &&
         mode.count == null
       ) {
         return true;
@@ -273,59 +349,99 @@ const helixCommandBindings: {
 
       panel.showSearchInput();
     },
+    ["s"](view) {
+      const panel = getCommandPanel(view);
+
+      panel.showSearchInput(SearchMode.Selection);
+    },
+    ["Alt-s"](view) {
+      const selections: SelectionRange[] = [];
+      const lines = new Set<number>();
+
+      for (const range of view.state.selection.ranges) {
+        const start = view.state.doc.lineAt(range.from).number;
+        const endLine = view.state.doc.lineAt(range.to);
+        const end =
+          endLine.from === range.to ? endLine.number - 1 : endLine.number;
+
+        for (let l = start; l <= end; l++) {
+          const line = view.state.doc.line(l);
+
+          if (lines.has(line.number)) {
+            continue;
+          }
+
+          lines.add(line.number);
+
+          selections.push(EditorSelection.range(line.from, line.to));
+        }
+      }
+
+      view.dispatch({
+        selection: EditorSelection.create(selections, 0),
+      });
+    },
+    [","](view) {
+      if (view.state.selection.ranges.length === 1) {
+        return true;
+      }
+
+      view.dispatch({
+        selection: view.state.selection.asSingle(),
+      });
+    },
+    ["("](view) {
+      rotateSelection(view, false);
+    },
+    [")"](view) {
+      rotateSelection(view, true);
+    },
     ...countCommands,
     [":"](view, mode) {
       view.dispatch({
-        effects: modeEffect.of({ ...mode, count: undefined }),
+        effects: resetMode(mode),
       });
 
       getCommandPanel(view).showCommandInput();
     },
-    ["y"](view) {
-      const selection = view.state.selection.main;
-
-      view.dispatch({
-        effects: yankEffect.of([
-          `"`,
-          view.state.doc.slice(selection.from, selection.to),
-        ]),
-      });
-
-      getCommandPanel(view).showMessage('yanked 1 selection to register "');
+    ["y"](view, mode) {
+      getCommandPanel(view).showMessage(yank(view, mode));
     },
     ["a"]: {
       checkpoint: "temp",
       command(view) {
         // TODO: extend selection
-        const selection = view.state.selection.main;
-
         view.dispatch({
           effects: MODE_EFF.INSERT,
-          selection: EditorSelection.cursor(selection.to),
+          selection: mapSel(view.state.selection, (range) =>
+            EditorSelection.range(range.to, range.to)
+          ),
         });
       },
     },
     ["A"]: {
       checkpoint: "temp",
       command(view) {
-        const selection = view.state.selection.main;
-        const end = view.state.doc.lineAt(selection.to).to;
-
         view.dispatch({
           effects: MODE_EFF.INSERT,
-          selection: EditorSelection.cursor(end),
+          selection: mapSel(view.state.selection, (range) => {
+            const end = view.state.doc.lineAt(range.to).to;
+            return EditorSelection.cursor(end);
+          }),
         });
       },
     },
     ["I"]: {
       checkpoint: "temp",
       command(view) {
-        const selection = view.state.selection.main;
-        const start = view.state.doc.lineAt(selection.from).from;
-
         view.dispatch({
           effects: MODE_EFF.INSERT,
-          selection: EditorSelection.cursor(start),
+          selection: mapSel(view.state.selection, (range) => {
+            // TODO: line start takes into account whitespace
+            const start = view.state.doc.lineAt(range.from).from;
+
+            return EditorSelection.cursor(start);
+          }),
         });
       },
     },
@@ -356,31 +472,65 @@ const helixCommandBindings: {
     ["P"]: {
       checkpoint: true,
       command(view, mode) {
-        const yanked = view.state.field(registersField);
+        const yanked = readRegister(view.state, mode.register);
 
-        paste(view, yanked[`"`], false, cmdCount(mode));
+        paste(view, yanked, true, cmdCount(mode));
       },
     },
     ["p"]: {
       checkpoint: true,
       command(view, mode) {
-        const yanked = view.state.field(registersField);
+        const yanked = readRegister(view.state, mode.register);
 
-        paste(view, yanked[`"`], true, cmdCount(mode));
+        paste(view, yanked, false, cmdCount(mode));
       },
     },
     ["R"]: {
       checkpoint: true,
       command(view, mode) {
-        const contents = view.state.field(registersField)[`"`] ?? "";
+        const contents = readRegister(view.state, mode.register);
+
+        if (!contents) {
+          return true;
+        }
+
         const count = cmdCount(mode);
-        const replacement =
-          count === 1 ? contents : contents.toString().repeat(count);
+        const yanks = yanksForSelection(view.state.selection, contents);
 
-        const tr = view.state.replaceSelection(replacement);
-        tr.effects = MODE_EFF.NORMAL;
+        const replacements =
+          count === 1
+            ? yanks
+            : yanks.map((yank) => yank.toString().repeat(count));
 
-        view.dispatch(tr);
+        const byIndex = new Map(
+          view.state.selection.ranges.map((range, i) => [range, i])
+        );
+
+        const tr = view.state.changeByRange((range) => {
+          const insert = replacements[byIndex.get(range)!];
+
+          if (!insert) {
+            return { range };
+          }
+
+          // FIXME: fix ranges
+          return {
+            range: EditorSelection.range(
+              range.from,
+              range.from + insert.length
+            ),
+            changes: {
+              from: range.from,
+              to: range.to,
+              insert: insert,
+            },
+          };
+        });
+
+        view.dispatch({
+          ...tr,
+          effects: [...tr.effects, MODE_EFF.NORMAL],
+        });
       },
     },
     ["r"]: {
@@ -399,29 +549,14 @@ const helixCommandBindings: {
       },
     },
     ["w"](view, mode) {
-      if (mode.type === ModeType.Normal) {
-        const current = view.state.selection.main;
-
-        view.dispatch({
-          selection: EditorSelection.single(Math.max(current.from, current.to)),
-        });
-      }
-
-      for (let _i = 0; _i < cmdCount(mode); _i++) {
-        selectGroupRight(view);
-      }
+      // FIXME: this is a temporary hack to have something
+      moveByGroup(view, mode, true);
+    },
+    ["e"](view, mode) {
+      moveByGroup(view, mode, true);
     },
     ["b"](view, mode) {
-      if (mode.type === ModeType.Normal) {
-        const current = view.state.selection.main;
-        view.dispatch({
-          selection: EditorSelection.single(Math.min(current.from, current.to)),
-        });
-      }
-
-      for (let _i = 0; _i < cmdCount(mode); _i++) {
-        selectGroupLeft(view);
-      }
+      moveByGroup(view, mode, false);
     },
     ["v"](view, mode) {
       view.dispatch({
@@ -430,35 +565,28 @@ const helixCommandBindings: {
       });
     },
     ["g"](view, mode) {
-      const isNormal = mode.type === ModeType.Normal;
-
       view.dispatch({
-        effects: isNormal ? MODE_EFF.NORMAL_GOTO : MODE_EFF.SELECT_GOTO,
+        effects: overwriteMode(mode, { minor: MinorMode.Goto }),
       });
     },
     ["Space"](view, mode) {
-      const isNormal = mode.type === ModeType.Normal;
-
       view.dispatch({
-        effects: isNormal ? MODE_EFF.NORMAL_SPACE : MODE_EFF.SELECT_SPACE,
+        effects: overwriteMode(mode, { minor: MinorMode.Space }),
       });
     },
     ["m"](view, mode) {
-      const isNormal = mode.type === ModeType.Normal;
-
       view.dispatch({
-        effects: isNormal ? MODE_EFF.NORMAL_MATCH : MODE_EFF.SELECT_MATCH,
+        effects: overwriteMode(mode, { minor: MinorMode.Match }),
       });
     },
     ["i"]: {
       checkpoint: "temp",
       command(view) {
-        const selection = view.state.selection.main;
-        const cursor = Math.min(selection.from, selection.to);
-
         view.dispatch({
           effects: MODE_EFF.INSERT,
-          selection: EditorSelection.cursor(cursor),
+          selection: mapSel(view.state.selection, (range) =>
+            EditorSelection.range(range.from, range.from)
+          ),
         });
       },
     },
@@ -571,47 +699,46 @@ const helixCommandBindings: {
       });
     },
     ["x"](view, mode) {
-      const initial = view.state.selection.main;
+      function extend(range: SelectionRange) {
+        const startLine = view.state.doc.lineAt(range.from);
+        let endLine = view.state.doc.lineAt(range.to);
 
-      const startLine = view.state.doc.lineAt(initial.from);
-      let endLine = view.state.doc.lineAt(initial.to);
+        if (!range.empty && range.to === endLine.from) {
+          endLine = view.state.doc.line(endLine.number - 1);
+        }
 
-      if (!initial.empty && initial.to === endLine.from) {
-        endLine = view.state.doc.line(endLine.number - 1);
-      }
-
-      const ideal = EditorSelection.range(
-        startLine.from,
-        Math.min(
-          view.state.doc.length,
-          endLine.to + view.state.lineBreak.length
-        )
-      );
-
-      let nextSel: SelectionRange;
-
-      const perfectLineSelection =
-        ideal.from === initial.from && ideal.to === initial.to;
-
-      if (perfectLineSelection || mode.count) {
-        const nextLineNumber = Math.min(
-          endLine.number + cmdCount(mode),
-          view.state.doc.lines
-        );
-        const nextLine = view.state.doc.line(nextLineNumber);
-        nextSel = EditorSelection.range(
+        const ideal = EditorSelection.range(
           startLine.from,
           Math.min(
             view.state.doc.length,
-            nextLine.to + view.state.lineBreak.length
+            endLine.to + view.state.lineBreak.length
           )
         );
-      } else {
-        nextSel = ideal;
+
+        const perfectLineSelection =
+          ideal.from === range.from && ideal.to === range.to;
+
+        if (perfectLineSelection || mode.count) {
+          const nextLineNumber = Math.min(
+            endLine.number + cmdCount(mode),
+            view.state.doc.lines
+          );
+          const nextLine = view.state.doc.line(nextLineNumber);
+
+          return EditorSelection.range(
+            startLine.from,
+            Math.min(
+              view.state.doc.length,
+              nextLine.to + view.state.lineBreak.length
+            )
+          );
+        } else {
+          return ideal;
+        }
       }
 
       view.dispatch({
-        selection: nextSel,
+        selection: mapSel(view.state.selection, extend),
         effects: resetCount(mode),
       });
 
@@ -657,8 +784,19 @@ const helixCommandBindings: {
         }
       }
 
+      const newRange = EditorSelection.range(
+        match!.value.from,
+        match!.value.to
+      );
+
+      let newSel: EditorSelection | SelectionRange = newRange;
+
+      if (mode.type === ModeType.Select) {
+        newSel = view.state.selection.addRange(newRange);
+      }
+
       view.dispatch({
-        selection: EditorSelection.range(match!.value.from, match!.value.to),
+        selection: newSel,
         scrollIntoView: true,
       });
 
@@ -700,6 +838,18 @@ const helixCommandBindings: {
         effects: resetCount(mode),
       });
     },
+    ["Ctrl-a"]: {
+      checkpoint: true,
+      command(view) {
+        changeNumber(view, true);
+      },
+    },
+    ["Ctrl-x"]: {
+      checkpoint: true,
+      command(view) {
+        changeNumber(view, false);
+      },
+    },
     ["Ctrl-d"](view, mode) {
       moveByHalfPage(view, mode, true);
     },
@@ -710,12 +860,10 @@ const helixCommandBindings: {
     },
     [";"](view) {
       withHelixSelection(view, () => {
-        if (view.state.selection.main.empty) {
-          return false;
-        }
-
         view.dispatch({
-          selection: EditorSelection.cursor(view.state.selection.main.head),
+          selection: mapSel(view.state.selection, (range) =>
+            EditorSelection.cursor(range.head)
+          ),
           scrollIntoView: true,
         });
 
@@ -723,26 +871,22 @@ const helixCommandBindings: {
       });
     },
     ["Alt-;"](view) {
-      const selection = view.state.selection.main;
-
-      if (atomicRange(selection, view.state.doc)) {
-        return;
-      }
-
       view.dispatch({
-        selection: EditorSelection.range(selection.head, selection.anchor),
+        selection: mapSel(view.state.selection, (range) =>
+          atomicRange(range, view.state.doc)
+            ? range
+            : EditorSelection.range(range.head, range.anchor)
+        ),
         scrollIntoView: true,
       });
     },
     ["Alt-:"](view) {
-      const selection = view.state.selection.main;
-
-      if (atomicRange(selection, view.state.doc)) {
-        return;
-      }
-
       view.dispatch({
-        selection: EditorSelection.range(selection.from, selection.to),
+        selection: mapSel(view.state.selection, (range) =>
+          atomicRange(range, view.state.doc)
+            ? range
+            : EditorSelection.range(range.from, range.to)
+        ),
       });
     },
     ["Alt-ArrowUp"](view) {
@@ -817,46 +961,47 @@ const helixCommandBindings: {
       },
     },
     ["*"](view) {
-      const selection = view.state.selection.main;
+      const yanked = new Set(
+        view.state.selection.ranges.map((range) =>
+          escapeRegex(view.state.doc.sliceString(range.from, range.to))
+        )
+      );
+      const search = [...yanked].join("|");
 
-      const selected = view.state.doc
-        .slice(selection.from, selection.to)
-        .toString();
-
-      const yanked = escapeRegex(selected);
+      // FIXME: add \b
       view.dispatch({
-        effects: yankEffect.of(["/", yanked]),
+        effects: yankEffect.of(["/", [search]]),
       });
 
-      getCommandPanel(view).showMessage(`register '/' set to '${yanked}'`);
+      getCommandPanel(view).showMessage(`register '/' set to '${search}'`);
     },
     ["_"](view) {
-      const selection = view.state.selection.main;
-
-      const selected = view.state.doc
-        .slice(selection.from, selection.to)
-        .toString();
-
-      const trimmed = selected.trim();
-
-      if (trimmed === selected) {
-        return;
-      }
-
-      const startOffset = selected.indexOf(trimmed);
-      const endOffset = selected.length - trimmed.length - startOffset;
-
-      const anchor =
-        selection.anchor === selection.from
-          ? selection.anchor + startOffset
-          : selection.anchor - endOffset;
-      const head =
-        selection.head === selection.to
-          ? selection.head - endOffset
-          : selection.head + startOffset;
-
       view.dispatch({
-        selection: EditorSelection.range(anchor, head),
+        selection: mapSel(view.state.selection, (range) => {
+          const selected = view.state.doc
+            .slice(range.from, range.to)
+            .toString();
+
+          const trimmed = selected.trim();
+
+          if (trimmed === selected) {
+            return range;
+          }
+
+          const startOffset = selected.indexOf(trimmed);
+          const endOffset = selected.length - trimmed.length - startOffset;
+
+          const anchor =
+            range.anchor === range.from
+              ? range.anchor + startOffset
+              : range.anchor - endOffset;
+          const head =
+            range.head === range.to
+              ? range.head - endOffset
+              : range.head + startOffset;
+
+          return EditorSelection.range(anchor, head);
+        }),
       });
     },
     ["Home"]: cursorToLineStart,
@@ -864,6 +1009,7 @@ const helixCommandBindings: {
     ["J"]: {
       checkpoint: true,
       command(view) {
+        // FIXME: multiple
         const selection = view.state.selection.main;
 
         const { doc } = view.state;
@@ -937,17 +1083,26 @@ const helixCommandBindings: {
     },
     ["["](view, mode) {
       view.dispatch({
-        effects: modeEffect.of({
-          type: mode.type,
-          minor: MinorMode.LeftBracket,
-        }),
+        effects: overwriteMode(mode, { minor: MinorMode.LeftBracket }),
       });
     },
     ["]"](view, mode) {
       view.dispatch({
-        effects: modeEffect.of({
-          type: mode.type,
-          minor: MinorMode.RightBracket,
+        effects: overwriteMode(mode, { minor: MinorMode.RightBracket }),
+      });
+    },
+    [`"`](view, mode) {
+      view.dispatch({
+        effects: overwriteMode(mode, {
+          expecting: {
+            minor: `"`,
+            metadata: undefined,
+            callback(view, char, _metadata) {
+              view.dispatch({
+                effects: modeEffect.of({ ...mode, register: char }),
+              });
+            },
+          },
         }),
       });
     },
@@ -1038,47 +1193,84 @@ const helixCommandBindings: {
       },
     },
     ["m"](view, mode) {
-      const selection = matchBracket(view) ?? undefined;
+      const bracketSelections = matchBracket(view) ?? undefined;
 
       const isNormal = mode.type === ModeType.Normal;
 
+      const selections = bracketSelections.map((bracketSelection) => {
+        if (bracketSelection == null) {
+          return undefined;
+        }
+
+        let selection = EditorSelection.range(
+          bracketSelection.from,
+          bracketSelection.to
+        );
+
+        if (!isNormal) {
+          const bracketCursor = bracketSelection.from;
+          const internal = cmSelToInternal(
+            view.state.selection.main,
+            view.state.doc
+          );
+
+          selection = internalSelToCM(
+            EditorSelection.range(internal.anchor, bracketCursor),
+            view.state.doc
+          );
+        }
+
+        return selection;
+      });
+
       view.dispatch({
-        selection:
-          selection?.from == null
-            ? undefined
-            : isNormal
-            ? EditorSelection.cursor(selection.from)
-            : EditorSelection.range(
-                view.state.selection.main.anchor,
-                selection.from
-              ),
+        selection: EditorSelection.create(
+          view.state.selection.ranges.map((range, i) => selections[i] ?? range),
+          view.state.selection.mainIndex
+        ),
         effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
         scrollIntoView: true,
       });
     },
+    ["a"](view, mode) {
+      view.dispatch({
+        effects: modeEffect.of({
+          type: mode.type,
+          minor: MinorMode.Match,
+          expecting: {
+            minor: "a",
+            callback: extendToDelimiters,
+            metadata: true,
+          },
+        }),
+      });
+    },
+    ["i"](view, mode) {
+      view.dispatch({
+        effects: modeEffect.of({
+          type: mode.type,
+          minor: MinorMode.Match,
+          expecting: {
+            minor: "i",
+            callback: extendToDelimiters,
+            metadata: false,
+          },
+        }),
+      });
+    },
   },
   space: {
-    ["y"](view) {
-      const selection = view.state.selection.main;
-
-      navigator.clipboard.writeText(
-        view.state.doc.slice(selection.from, selection.to).toString()
-      );
-
-      getCommandPanel(view).showMessage("yanked 1 selection to register +");
-
-      view.dispatch({
-        effects: MODE_EFF.NORMAL,
-      });
+    ["y"](view, mode) {
+      getCommandPanel(view).showMessage(yank(view, mode, "+"));
     },
     ["p"]: {
       checkpoint: true,
       command(view) {
         view.dispatch({ effects: MODE_EFF.NORMAL });
 
-        navigator.clipboard
-          .readText()
-          .then((yanked) => paste(view, yanked, true, 1, false));
+        readClipboard(view.state).then((yanked) =>
+          paste(view, yanked, false, 1, { reset: false })
+        );
       },
     },
     ["P"]: {
@@ -1086,17 +1278,19 @@ const helixCommandBindings: {
       command(view) {
         view.dispatch({ effects: MODE_EFF.NORMAL });
 
-        navigator.clipboard
-          .readText()
-          .then((yanked) => paste(view, yanked, false, 1, false));
+        readClipboard(view.state).then((yanked) =>
+          paste(view, yanked, true, 1, { reset: false })
+        );
       },
     },
+    // FIXME: align with the non-clipboard one
     ["R"]: {
       checkpoint: true,
       command(view) {
         view.dispatch({ effects: MODE_EFF.NORMAL });
-        navigator.clipboard.readText().then((yanked) => {
-          const tr = view.state.replaceSelection(yanked);
+
+        readClipboard(view.state).then((yanked) => {
+          const tr = view.state.replaceSelection(yanked[0]);
           view.dispatch(tr);
         });
       },
@@ -1130,7 +1324,7 @@ const helixCommandBindings: {
         view.state.facet(externalCommandsFacet).global_search != null;
 
       if (enabled) {
-        getCommandPanel(view).showSearchInput(true);
+        getCommandPanel(view).showSearchInput(SearchMode.Global);
       }
 
       view.dispatch({
@@ -1158,6 +1352,40 @@ const helixCommandBindings: {
     },
   },
 };
+
+function moveByGroup(view: EditorView, mode: NormalLikeMode, forward: boolean) {
+  const normal = mode.type === ModeType.Normal;
+
+  const tr = view.state.changeByRange((range) => {
+    let nextAnchor = normal ? range.head : range.anchor;
+    let nextHead = view.moveByGroup(
+      EditorSelection.cursor(range.head),
+      forward
+    ).anchor;
+
+    let fixed = fixAtomicRange(
+      EditorSelection.range(nextAnchor, nextHead),
+      view.state.doc
+    );
+    if (nextAnchor === nextHead || fixed.eq(range)) {
+      nextHead = view.moveByGroup(
+        EditorSelection.cursor(range.anchor),
+        forward
+      ).anchor;
+    }
+
+    fixed = fixAtomicRange(
+      EditorSelection.range(nextAnchor, nextHead),
+      view.state.doc
+    );
+
+    return {
+      range: fixed,
+    };
+  });
+
+  view.dispatch(tr);
+}
 
 function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
   const allKeys = [
@@ -1210,7 +1438,7 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
 
   for (const key of allKeys) {
     const insertCommand = getExplicitCommand(key, keybindings.insert) as
-      | SimpleCommand<undefined>
+      | SimpleCommand<ModeState & { type: ModeType.Insert }>
       | undefined;
     const normalCommand = getExplicitCommand(key, keybindings.normal) as
       | ExplicitCommandDef<NormalLikeMode>
@@ -1241,7 +1469,7 @@ function toCodemirrorKeymap(keybindings: typeof helixCommandBindings) {
 
       if (mode.type === ModeType.Insert) {
         if (insertCommand) {
-          return insertCommand(view, undefined) ?? true;
+          return insertCommand(view, mode) ?? true;
         } else {
           return false;
         }
@@ -1298,19 +1526,26 @@ const endlineCursorWidget = Decoration.widget({
 });
 
 function drawCursorMark(selection: EditorSelection, doc: Text) {
-  const headSel = internalSelToCM(
-    EditorSelection.cursor(cmSelToInternal(selection.main, doc).head),
-    doc
+  const headSelections = selection.ranges.map((range) =>
+    internalSelToCM(
+      EditorSelection.cursor(cmSelToInternal(range, doc).head),
+      doc
+    )
   );
-  const line = doc.lineAt(headSel.head);
 
-  if (headSel.from === doc.length || line.to === headSel.from) {
-    return Decoration.set(
-      endlineCursorWidget.range(headSel.from, headSel.from)
-    );
-  } else {
-    return Decoration.set(cursorMark.range(headSel.head, headSel.anchor));
+  const decorations: Range<Decoration>[] = [];
+
+  for (const headSel of headSelections) {
+    const line = doc.lineAt(headSel.head);
+
+    if (headSel.from === doc.length || line.to === headSel.from) {
+      decorations.push(endlineCursorWidget.range(headSel.from, headSel.from));
+    } else {
+      decorations.push(cursorMark.range(headSel.head, headSel.anchor));
+    }
   }
+
+  return Decoration.set(decorations);
 }
 
 function letThrough(tr: Transaction) {
@@ -1379,13 +1614,9 @@ const unhandledCommandsFilter = EditorState.transactionFilter.from(
 
 // TODO: this trick doesn't work with compositing. We have to
 // bite the bullet and let an external source of input take care of this.
-const inputHandler = EditorView.inputHandler.from(
+const expectingInputHandler = EditorView.inputHandler.from(
   modeField,
   (mode) => (view, _from, _to, text) => {
-    if (mode.type === ModeType.Insert) {
-      return false;
-    }
-
     if (mode.expecting) {
       mode.expecting.callback(view, text, mode.expecting.metadata);
       return true;
@@ -1395,7 +1626,7 @@ const inputHandler = EditorView.inputHandler.from(
   }
 );
 
-const updateListener = EditorView.updateListener.of((viewUpdate) => {
+const modeUpdateListener = EditorView.updateListener.of((viewUpdate) => {
   const { state, startState } = viewUpdate;
 
   const panel = getPanel(viewUpdate.view, statusPanel) as ReturnType<
@@ -1409,8 +1640,11 @@ const updateListener = EditorView.updateListener.of((viewUpdate) => {
     const startExternalMode = toExternalMode(startMode);
     const externalMode = toExternalMode(mode);
 
-    if (startExternalMode !== externalMode) {
-      panel.setMode(externalMode);
+    if (
+      startExternalMode !== externalMode ||
+      (mode as NonInsertMode).register !== (startMode as NonInsertMode).register
+    ) {
+      panel.setMode(externalMode, (mode as NonInsertMode).register);
     }
   }
 
@@ -1480,6 +1714,30 @@ const externalCommandsFacet = Facet.define<
 export { externalCommandsFacet as externalCommands };
 
 /**
+ * Exposes the contents of a given register for external consumption
+ * for e.g. reading registers in external UI elements, suck as pickers.
+ */
+function externalReadRegister(state: EditorState, register: string) {
+  const contents = readRegister(state, register);
+
+  return contents?.at(0);
+}
+
+export { externalReadRegister as readRegister };
+
+/**
+ * Allows the embedder to provide the "path" i.e. the contents of the `%` register.
+ */
+export const pathRegister = Facet.define<
+  string | undefined,
+  string | undefined
+>({
+  combine(values) {
+    return values.at(-1);
+  },
+});
+
+/**
  * Creates a snapshot of the extension state suitable to initialize
  * the extension later (see `init` and `globalInit`). Snapshots are JSON-serializable.
  *
@@ -1520,10 +1778,12 @@ export const commands = Facet.define<TypableCommand[], TypableCommand[]>({
   },
 });
 
+const exportedResetMode: StateEffect<any> = MODE_EFF.NORMAL;
+
 /**
  * An effect to reset the mode of an editor.
  */
-export const resetMode: StateEffect<any> = MODE_EFF.NORMAL;
+export { exportedResetMode as resetMode };
 
 /**
  * A command that can be typed in command mode `:`.
@@ -1614,7 +1874,8 @@ export function helix(options: Options = {}): Extension {
     searchFacet.from(registersField, (registers) => registers["/"]?.toString()),
     unhandledCommandsFilter,
     selectByClickFilter,
-    inputHandler,
+    expectingInputHandler,
+    EditorState.allowMultipleSelections.of(true),
     EditorState.transactionFilter.from(syntaxHistoryField, ({ selections }) =>
       selections.length === 0
         ? letThrough
@@ -1638,7 +1899,7 @@ export function helix(options: Options = {}): Extension {
 
       return drawCursorMark(state.selection, state.doc);
     }),
-    updateListener,
+    modeUpdateListener,
     showPanel.of(statusPanel),
     showPanel.of(commandPanel),
     syntaxHistoryField,
@@ -1748,9 +2009,7 @@ export function helix(options: Options = {}): Extension {
 }
 
 function commandPanel(view: EditorView) {
-  return new CommandPanel(view, commands, (global) =>
-    startSearch(view, global)
-  );
+  return new CommandPanel(view, commands, (mode) => startSearch(view, mode));
 }
 
 function getCommandPanel(view: EditorView) {

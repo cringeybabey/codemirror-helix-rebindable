@@ -7,7 +7,8 @@ import {
   Transaction,
   TransactionSpec,
 } from "@codemirror/state";
-import { MinorMode, ModeState, ModeType } from "./entities";
+import { MinorMode, ModeState, ModeType, NonInsertMode } from "./entities";
+import { pathRegister } from "./lib";
 
 export const modeEffect = StateEffect.define<ModeState>();
 
@@ -26,6 +27,20 @@ export const modeField = StateField.define<ModeState>({
   },
 });
 
+export function resetMode(
+  mode: NonInsertMode,
+  override?: Partial<NonInsertMode>
+) {
+  return modeEffect.of({ type: mode.type, minor: mode.minor, ...override });
+}
+
+export function overwriteMode(
+  mode: NonInsertMode,
+  override?: Partial<NonInsertMode>
+) {
+  return modeEffect.of({ ...mode, ...override });
+}
+
 export function sameMode(mode: ModeState, otherMode: ModeState) {
   return (
     mode.type === otherMode.type &&
@@ -37,6 +52,7 @@ export function sameModeState(mode: ModeState, otherMode: ModeState) {
   return (
     sameMode(mode, otherMode) &&
     (mode as any).count === (otherMode as any).count &&
+    (mode as any).register === (otherMode as any).register &&
     (mode as any).expecting === (otherMode as any).expecting
   );
 }
@@ -44,15 +60,13 @@ export function sameModeState(mode: ModeState, otherMode: ModeState) {
 export function modeStatus(mode: ModeState) {
   let result = "";
 
-  if (mode.type === ModeType.Insert) {
-    return result;
-  }
+  if (mode.type !== ModeType.Insert) {
+    if (mode.count) {
+      result += mode.count;
+    }
 
-  if (mode.count) {
-    result += mode.count;
+    result += minorModeStr(mode.minor);
   }
-
-  result += minorModeStr(mode.minor);
 
   if (mode.expecting) {
     result += mode.expecting.minor;
@@ -84,10 +98,51 @@ function minorModeStr(minor: MinorMode) {
 }
 
 export const yankEffect = StateEffect.define<
-  [string, string | Text] | { reset: Record<string, string | Text> }
+  | [string, Array<string | Text>]
+  | { reset: Record<string, Array<string | Text>> }
 >();
 
-export const registersField = StateField.define<Record<string, string | Text>>({
+export function readRegister(state: EditorState, register?: string) {
+  switch (register) {
+    case "#": {
+      return state.selection.ranges.map((_, i) => String(i + 1));
+    }
+    case "_": {
+      return [];
+    }
+    case ".": {
+      return state.selection.ranges.map((range) =>
+        state.sliceDoc(range.from, range.to)
+      );
+    }
+    case "%": {
+      const path = state.facet(pathRegister);
+
+      return path != null ? [path] : [];
+    }
+    default: {
+      return state.field(registersField)[register ?? `"`] as
+        | Array<string | Text>
+        | undefined;
+    }
+  }
+}
+
+export async function readClipboard(state: EditorState) {
+  const yanked = readRegister(state, "+");
+
+  const copied = await navigator.clipboard.readText();
+
+  if (yanked?.map((yank) => yank.toString()).join("\n") === copied) {
+    return yanked;
+  }
+
+  return [copied];
+}
+
+export const registersField = StateField.define<
+  Record<string, Array<string | Text>>
+>({
   create() {
     return {};
   },
@@ -99,6 +154,24 @@ export const registersField = StateField.define<Record<string, string | Text>>({
         }
 
         const [reg, value] = effect.value;
+
+        switch (reg) {
+          case "_":
+          case "%":
+          case ".":
+          case "#": {
+            return registers;
+          }
+
+          case "+": {
+            navigator.clipboard.writeText(
+              // FIXME: proper line ending?
+              value.map((yank) => yank.toString()).join("\n")
+            );
+
+            // fall through
+          }
+        }
 
         if (value.length === 0) {
           const { [reg]: _reg, ...rest } = registers;

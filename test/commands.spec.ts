@@ -4,7 +4,9 @@ import { Key } from "webdriverio";
 type Assertion =
   | string
   | {
-      selection: [anchor: number, head: number];
+      selection:
+        | [anchor: number, head: number]
+        | Array<[anchor: number, head: number]>;
       text?: string;
     };
 
@@ -121,6 +123,34 @@ const cases: Case[] = [
     ["x", "_", "y", "Alt-;", ";", "j", "l", "P"],
     "hello\nwhelloorld",
   ],
+  [
+    "surround add multiple selections",
+    "xxxeyyy\nxxxxeyyy",
+    ["%", "s", "e", "Enter", "v", "l", "l", "m", "s", ")"],
+    {
+      text: "xxx(eyy)y\nxxxx(eyy)y",
+      selection: [
+        [3, 8],
+        [14, 19],
+      ],
+    },
+  ],
+  [
+    "select inside",
+    "abc(xyz)abc",
+    ["x", "s", "y", "Enter", "m", "i", "("],
+    {
+      selection: [4, 7],
+    },
+  ],
+  [
+    "select around",
+    "abc(xy(z)w)abc",
+    ["x", "s", "y", "Enter", "v", "h", "m", "a", "("],
+    {
+      selection: [11, 3],
+    },
+  ],
 ];
 
 describe("codemirror-helix", () => {
@@ -161,10 +191,13 @@ describe("codemirror-helix", () => {
       if (expectedSelection != null) {
         const selection = await getSelection();
 
-        expect(selection).toEqual({
-          anchor: expectedSelection[0],
-          head: expectedSelection[1],
-        });
+        const expectation = (
+          Array.isArray(expectedSelection[0])
+            ? (expectedSelection as Array<[number, number]>)
+            : [expectedSelection as [number, number]]
+        ).map(([anchor, head]) => ({ anchor, head }));
+
+        expect((selection as any).ranges).toEqual(expectation);
       }
 
       if (expectedText != null) {
@@ -195,8 +228,9 @@ function getDoc() {
 }
 
 function getSelection() {
-  return browser.execute("return view.state.selection.main.toJSON()");
+  return browser.execute("return view.state.selection.toJSON()");
 }
+
 function toKeys(commands: string[]) {
   const keys: Array<string | string[]> = [];
 

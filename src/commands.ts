@@ -600,17 +600,13 @@ export function surround(view: EditorView, char: string) {
   const offset = open.length + close.length;
 
   const tr = view.state.changeByRange((range) => {
-    const internal = cmSelToInternal(range, view.state.doc);
     const [anchor, head] =
-      rangeForward(internal) || internal.empty
-        ? [internal.anchor, internal.head + offset]
-        : [internal.anchor + offset, internal.head];
+      rangeForward(range) || range.empty
+        ? [range.anchor, range.head + offset]
+        : [range.anchor + offset, range.head];
 
     return {
-      range: internalSelToCM(
-        EditorSelection.range(anchor, head),
-        view.state.doc
-      ),
+      range: EditorSelection.range(anchor, head),
       changes: [
         {
           from: range.from,

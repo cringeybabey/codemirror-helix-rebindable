@@ -563,59 +563,66 @@ const PAIRS: Record<string, [string, string, boolean]> = {
 const MATCHEABLE = new Set([...Object.keys(PAIRS), `"`, "'"]);
 
 export function matchBracket(view: EditorView) {
-  const selection = view.state.selection.main;
+  return view.state.selection.ranges.map((range) => {
+    const internal = cmSelToInternal(range, view.state.doc);
+    const collapsed = internalSelToCM(
+      EditorSelection.range(internal.head, internal.head),
+      view.state.doc
+    );
+    const char = view.state.doc.sliceString(collapsed.from, collapsed.to);
 
-  const char = view.state.doc.sliceString(selection.head, selection.head + 1);
+    if (!MATCHEABLE.has(char)) {
+      // TODO: find surrounding pair
 
-  if (!MATCHEABLE.has(char)) {
-    // TODO: find surrounding pair
+      return null;
+    }
 
-    return null;
-  }
+    const open = PAIRS[char]?.[2] ?? false;
+    const match = matchBrackets(
+      view.state,
+      collapsed.head + (open ? 0 : 1),
+      open ? 1 : -1
+    );
 
-  const open = PAIRS[char]?.[2] ?? false;
-  const match = matchBrackets(
-    view.state,
-    selection.head + (open ? 0 : 1),
-    open ? 1 : -1
-  );
-
-  if (match) {
-    return match.end;
-  }
+    if (match) {
+      return match.end;
+    }
+  });
 }
 
-export function surround(view: EditorView, char: string, proxy: ViewProxy) {
+export function surround(view: EditorView, char: string) {
   const pair = PAIRS[char];
-
-  const selection = view.state.selection.main;
 
   const open = pair?.[0] ?? char;
   const close = pair?.[1] ?? char;
+  const offset = open.length + close.length;
 
-  view.dispatch({
-    changes: [
-      {
-        from: selection.from,
-        insert: open,
-      },
-      {
-        from: selection.to,
-        insert: close,
-      },
-    ],
-    effects: MODE_EFF.NORMAL,
+  const tr = view.state.changeByRange((range) => {
+    const internal = cmSelToInternal(range, view.state.doc);
+    const [anchor, head] =
+      rangeForward(internal) || internal.empty
+        ? [internal.anchor, internal.head + offset]
+        : [internal.anchor + offset, internal.head];
+
+    return {
+      range: internalSelToCM(
+        EditorSelection.range(anchor, head),
+        view.state.doc
+      ),
+      changes: [
+        {
+          from: range.from,
+          insert: open,
+        },
+        {
+          from: range.to,
+          insert: close,
+        },
+      ],
+    };
   });
 
-  const newSelection = proxy.original.state.selection.main;
-  const offset = newSelection.anchor === newSelection.from ? 1 : -1;
-
-  const anchor = newSelection.anchor - offset;
-  const head = newSelection.head + offset;
-
-  proxy.original.dispatch({
-    selection: EditorSelection.range(anchor, head),
-  });
+  view.dispatch(tr, { effects: MODE_EFF.NORMAL });
 }
 
 export function replaceWithChar(_: EditorView, char: string, view: ViewLike) {

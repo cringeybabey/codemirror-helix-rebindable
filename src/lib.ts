@@ -1192,20 +1192,41 @@ const helixCommandBindings: {
       },
     },
     ["m"](view, mode) {
-      const selection = matchBracket(view) ?? undefined;
+      const bracketSelections = matchBracket(view) ?? undefined;
 
       const isNormal = mode.type === ModeType.Normal;
 
+      const selections = bracketSelections.map((bracketSelection) => {
+        if (bracketSelection == null) {
+          return undefined;
+        }
+
+        let selection = EditorSelection.range(
+          bracketSelection.from,
+          bracketSelection.to
+        );
+
+        if (!isNormal) {
+          const bracketCursor = bracketSelection.from;
+          const internal = cmSelToInternal(
+            view.state.selection.main,
+            view.state.doc
+          );
+
+          selection = internalSelToCM(
+            EditorSelection.range(internal.anchor, bracketCursor),
+            view.state.doc
+          );
+        }
+
+        return selection;
+      });
+
       view.dispatch({
-        selection:
-          selection?.from == null
-            ? undefined
-            : isNormal
-            ? EditorSelection.cursor(selection.from)
-            : EditorSelection.range(
-                view.state.selection.main.anchor,
-                selection.from
-              ),
+        selection: EditorSelection.create(
+          view.state.selection.ranges.map((range, i) => selections[i] ?? range),
+          view.state.selection.mainIndex
+        ),
         effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
         scrollIntoView: true,
       });

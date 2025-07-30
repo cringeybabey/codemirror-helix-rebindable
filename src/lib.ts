@@ -105,6 +105,7 @@ import {
   yanksForSelection,
   fixAtomicRange,
   yank,
+  extendToDelimiters,
 } from "./commands";
 import { backwardsSearch } from "./search";
 
@@ -1229,6 +1230,32 @@ const helixCommandBindings: {
         ),
         effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
         scrollIntoView: true,
+      });
+    },
+    ["a"](view, mode) {
+      view.dispatch({
+        effects: modeEffect.of({
+          type: mode.type,
+          minor: MinorMode.Match,
+          expecting: {
+            minor: "a",
+            callback: extendToDelimiters,
+            metadata: true,
+          },
+        }),
+      });
+    },
+    ["i"](view, mode) {
+      view.dispatch({
+        effects: modeEffect.of({
+          type: mode.type,
+          minor: MinorMode.Match,
+          expecting: {
+            minor: "i",
+            callback: extendToDelimiters,
+            metadata: false,
+          },
+        }),
       });
     },
   },

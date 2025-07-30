@@ -85,6 +85,8 @@ const state = {
   const loaded = Promise.all([
     import("./codemirror").then((mod) => {
       codemirror = mod;
+
+      (window as any).codemirror = codemirror;
     }),
     import("./shoelace").then(() => initShoelace()),
     // @ts-ignore

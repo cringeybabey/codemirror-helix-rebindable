@@ -11,6 +11,7 @@ import { modeEffect, modeField, yankEffect } from "./state";
 import { matchBrackets, syntaxTree } from "@codemirror/language";
 import type { SyntaxNode } from "@lezer/common";
 import { cursorLineStart, selectLineStart } from "@codemirror/commands";
+import { SearchQuery } from "@codemirror/search";
 
 type ViewLike = {
   state: EditorState;
@@ -569,6 +570,7 @@ export function matchBracket(view: EditorView) {
       EditorSelection.range(internal.head, internal.head),
       view.state.doc
     );
+
     const char = view.state.doc.sliceString(collapsed.from, collapsed.to);
 
     if (!MATCHEABLE.has(char)) {
@@ -623,6 +625,102 @@ export function surround(view: EditorView, char: string) {
   });
 
   view.dispatch(tr, { effects: MODE_EFF.NORMAL });
+}
+
+export function extendToDelimiters(
+  view: EditorView,
+  char: string,
+  inclusive: boolean
+) {
+  const mode = view.state.field(modeField);
+  const pair = PAIRS[char];
+
+  const open = pair?.[0] ?? char;
+  const close = pair?.[1] ?? char;
+
+  const query = new SearchQuery({
+    search: `${escape(open)}|${escape(close)}`,
+    regexp: true,
+  });
+
+  const openQuery = new SearchQuery({
+    search: open,
+    regexp: false,
+  });
+
+  const ranges = view.state.selection.ranges.map((range) => {
+    const cursor = query.getCursor(view.state, range.head);
+
+    let dir: 1 | -1 = 1;
+    let next = cursor.next();
+
+    if (next.done) {
+      return range;
+    }
+
+    if (
+      open !== close &&
+      view.state.sliceDoc(next.value.from, next.value.to) === open
+    ) {
+      const cursor = openQuery.getCursor(view.state, 0, range.head);
+
+      let nextOpen: ReturnType<typeof cursor["next"]> | undefined;
+
+      while (true) {
+        const next = cursor.next();
+
+        if (next.done) {
+          break;
+        }
+
+        nextOpen = {
+          done: false,
+          value: next.value,
+        };
+      }
+
+      if (!nextOpen || nextOpen?.done) {
+        return range;
+      }
+
+      dir = -1;
+      next = nextOpen;
+    }
+
+    // FIXME: does not handle quotes, etc. b/c relies on syntax
+    const match = matchBrackets(
+      view.state,
+      dir > 0 ? next.value.to : next.value.from,
+      -dir as 1 | -1
+    );
+
+    if (!match?.end) {
+      return range;
+    }
+
+    let [start, end] =
+      dir > 0 ? [match.end, next.value] : [next.value, match.end];
+
+    if (!inclusive) {
+      const startTo = nextClusterBreak(view.state.doc, start.to, true);
+      start = { from: start.to, to: startTo };
+
+      const endFrom = nextClusterBreak(view.state.doc, end.from, false);
+      end = { from: endFrom, to: end.from };
+    }
+
+    const [anchor, head] =
+      rangeForward(range) || atomicRange(range, view.state.doc)
+        ? [start.from, end.to]
+        : [end.to, start.from];
+
+    return EditorSelection.range(anchor, head);
+  });
+
+  view.dispatch({
+    selection: EditorSelection.create(ranges, view.state.selection.mainIndex),
+    effects: mode.type === ModeType.Normal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
+  });
 }
 
 export function replaceWithChar(_: EditorView, char: string, view: ViewLike) {
@@ -986,4 +1084,8 @@ export function mapSel(
     selection.ranges.map(mapper),
     selection.mainIndex
   );
+}
+
+function escape(source: string) {
+  return (RegExp as any).escape(source) as string;
 }

@@ -639,11 +639,6 @@ export function extendToDelimiters(
     regexp: true,
   });
 
-  const openQuery = new SearchQuery({
-    search: open,
-    regexp: false,
-  });
-
   const ranges = view.state.selection.ranges.map((range) => {
     const cursor = query.getCursor(view.state, range.head);
 
@@ -658,7 +653,7 @@ export function extendToDelimiters(
       open !== close &&
       view.state.sliceDoc(next.value.from, next.value.to) === open
     ) {
-      const cursor = openQuery.getCursor(view.state, 0, range.head);
+      const cursor = query.getCursor(view.state, 0, range.head);
 
       let nextOpen: ReturnType<typeof cursor["next"]> | undefined;
 
@@ -675,7 +670,11 @@ export function extendToDelimiters(
         };
       }
 
-      if (!nextOpen || nextOpen?.done) {
+      if (
+        !nextOpen ||
+        nextOpen?.done ||
+        view.state.sliceDoc(nextOpen.value.from, nextOpen.value.to) === close
+      ) {
         return range;
       }
 

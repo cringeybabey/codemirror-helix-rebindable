@@ -151,6 +151,14 @@ const cases: Case[] = [
       selection: [11, 3],
     },
   ],
+  [
+    "select inside",
+    "(ab)cd(ef)gh",
+    ["4", "l", "m", "i", "("],
+    {
+      selection: [5, 4],
+    },
+  ],
 ];
 
 describe("codemirror-helix", () => {

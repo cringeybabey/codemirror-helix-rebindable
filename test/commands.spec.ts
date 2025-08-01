@@ -152,17 +152,75 @@ const cases: Case[] = [
     },
   ],
   [
-    "select inside",
+    "select inside, no surrunding parens",
     "(ab)cd(ef)gh",
     ["4", "l", "m", "i", "("],
     {
       selection: [5, 4],
     },
   ],
+  [
+    "insert at line end",
+    "abc\nxyz",
+    ["A", "Escape"],
+    {
+      selection: [4, 3],
+    },
+  ],
+  [
+    "insert at line end, on line end",
+    "abc\nxyz",
+    ["A", "Escape", "A", "Escape"],
+    {
+      selection: [4, 3],
+    },
+  ],
+  [
+    "insert at line end, document end",
+    "abc\nxyz",
+    ["A", "Escape"],
+    {
+      selection: [4, 3],
+    },
+  ],
+  [
+    "go to last line",
+    "abc\nxyz",
+    ["g", "e"],
+    {
+      selection: [5, 4],
+    },
+  ],
+  [
+    "go to last line, select mode",
+    "abc\nxyz",
+    ["v", "g", "e"],
+    {
+      selection: [0, 5],
+    },
+  ],
+  [
+    "go to last line, final empty line",
+    "abc\nxyz\n",
+    ["g", "e"],
+    {
+      selection: [5, 4],
+    },
+  ],
+  [
+    "go to last line, extra empty line",
+    "abc\nxyz\n\n",
+    ["g", "e"],
+    {
+      selection: [9, 8],
+    },
+  ],
 ];
 
 describe("codemirror-helix", () => {
   const skipping = cases.some((case_) => case_.length === 5);
+
+  const caseNames = new Set();
 
   for (const case_ of cases) {
     let only = !skipping;
@@ -177,9 +235,17 @@ describe("codemirror-helix", () => {
       [title, text, commands, expected] = case_ as any;
     }
 
+    if (caseNames.has(title)) {
+      throw new Error("Repeated case name");
+    }
+
+    caseNames.add(title);
+
     const keys = toKeys(commands);
 
-    (only ? it.only : it)(title, async () => {
+    const itFn = only ? it.only : it;
+
+    itFn(title, async () => {
       await browser.url("http://localhost:45183");
 
       await initEditor(text);

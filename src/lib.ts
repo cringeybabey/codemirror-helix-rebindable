@@ -1,7 +1,6 @@
 import {
   cursorCharLeft,
   cursorCharRight,
-  cursorDocEnd,
   cursorDocStart,
   deleteCharBackward,
   deleteCharForward,
@@ -9,7 +8,6 @@ import {
   indentMore,
   insertNewlineAndIndent,
   selectAll,
-  selectDocEnd,
   selectDocStart,
   selectParentSyntax,
   toggleComment,
@@ -421,14 +419,8 @@ const helixCommandBindings: {
     },
     ["A"]: {
       checkpoint: "temp",
-      command(view) {
-        view.dispatch({
-          effects: MODE_EFF.INSERT,
-          selection: mapSel(view.state.selection, (range) => {
-            const end = view.state.doc.lineAt(range.to).to;
-            return EditorSelection.cursor(end);
-          }),
-        });
+      command(view, mode) {
+        cursorToLineEnd(view, mode, true);
       },
     },
     ["I"]: {
@@ -1122,12 +1114,25 @@ const helixCommandBindings: {
     ["e"](view, mode) {
       const isNormal = mode.type === ModeType.Normal;
 
-      withHelixSelection(view, () =>
-        isNormal ? cursorDocEnd(view) : selectDocEnd(view)
-      );
+      const start = view.state.selection.ranges[0].from;
+
+      const lastLine = view.state.doc.line(view.state.doc.lines);
+
+      const line =
+        lastLine.text || view.state.doc.lines === 1
+          ? lastLine
+          : view.state.doc.line(view.state.doc.lines - 1);
+      const end = line.from;
 
       view.dispatch({
+        selection: internalSelToCM(
+          isNormal
+            ? EditorSelection.cursor(end)
+            : EditorSelection.range(start, end),
+          view.state.doc
+        ),
         effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
+        scrollIntoView: true,
       });
     },
     ["h"]: cursorToLineStart,

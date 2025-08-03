@@ -157,8 +157,8 @@ export function cursorToLineStart(view: EditorView, mode: NonInsertMode) {
 
 function cursorToLineEndRange(
   range: SelectionRange,
-  view: EditorView,
-  select: boolean
+  view: ViewLike,
+  mode: ModeType
 ) {
   const selection = cmSelToInternal(range, view.state.doc);
 
@@ -168,21 +168,35 @@ function cursorToLineEndRange(
     return selection;
   }
 
-  const goal = nextClusterBreak(view.state.doc, line.to, false);
+  const goal =
+    mode === ModeType.Insert
+      ? line.to
+      : nextClusterBreak(view.state.doc, line.to, false);
 
-  return select
+  return mode === ModeType.Select
     ? EditorSelection.range(selection.anchor, goal, selection.goalColumn)
     : EditorSelection.cursor(goal, undefined, undefined, selection.goalColumn);
 }
 
-export function cursorToLineEnd(view: EditorView, mode: NonInsertMode) {
+export function cursorToLineEnd(
+  view: ViewLike,
+  mode: NonInsertMode,
+  insert?: boolean
+) {
   const select = mode.type === ModeType.Select;
 
   view.dispatch({
     selection: mapSel(view.state.selection, (range) =>
-      internalSelToCM(cursorToLineEndRange(range, view, select), view.state.doc)
+      internalSelToCM(
+        cursorToLineEndRange(range, view, insert ? ModeType.Insert : mode.type),
+        view.state.doc
+      )
     ),
-    effects: select ? MODE_EFF.SELECT : MODE_EFF.NORMAL,
+    effects: insert
+      ? MODE_EFF.INSERT
+      : select
+      ? MODE_EFF.SELECT
+      : MODE_EFF.NORMAL,
   });
 
   return true;

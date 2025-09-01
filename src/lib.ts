@@ -1639,15 +1639,17 @@ const modeUpdateListener = EditorView.updateListener.of((viewUpdate) => {
   >;
 
   const mode = state.field(modeField);
-  const startMode = startState.field(modeField);
+  // if helix was no enabled before (when using compartments) this could throw
+  const startMode = startState.field(modeField, false);
 
   if (mode !== startMode) {
-    const startExternalMode = toExternalMode(startMode);
+    const startExternalMode = startMode ? toExternalMode(startMode) : undefined;
     const externalMode = toExternalMode(mode);
 
     if (
       startExternalMode !== externalMode ||
-      (mode as NonInsertMode).register !== (startMode as NonInsertMode).register
+      (mode as NonInsertMode).register !==
+        (startMode as NonInsertMode | undefined)?.register
     ) {
       panel.setMode(externalMode, (mode as NonInsertMode).register);
     }

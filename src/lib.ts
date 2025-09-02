@@ -322,6 +322,8 @@ const helixCommandBindings: {
         }),
       });
     },
+    Tab: indentMore,
+    "Shift-Tab": indentLess,
   },
   normal: {
     // this one is special: we let it apply to all other minor modes
@@ -1097,6 +1099,12 @@ const helixCommandBindings: {
           },
         }),
       });
+    },
+    Tab() {
+      // FIXME: jumplist
+    },
+    ["Shift-Tab"]() {
+      // ignore
     },
   },
   goto: {

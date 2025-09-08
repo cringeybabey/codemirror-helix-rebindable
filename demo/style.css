@@ -3,14 +3,14 @@
 }
 
 hx-picker .selected {
-  background: #ddd;
+  background: light-dark(#ddd, #101010);
 }
 
 hx-picker {
   font-family: monospace;
   border: 1px solid #bbb;
   position: absolute;
-  background: #f0f0f0;
+  background: light-dark(#f0f0f0, #21252b);
   top: 10em;
   max-width: 80%;
   min-width: 50%;
@@ -26,6 +26,7 @@ hx-picker ul {
 }
 
 hx-picker li {
+  padding: 2px 4px;
   cursor: default;
 }
 

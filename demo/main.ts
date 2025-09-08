@@ -366,6 +366,11 @@ const optionsEl = document.querySelector("#options")! as HTMLElement;
   }
 
   const themeEl = optionsEl.querySelector("[name=dark]")! as HTMLInputElement;
+
+  if (darkTheme) {
+    themeEl.checked = true;
+  }
+
   themeEl.onchange = () => {
     localStorage.setItem("cm-hx-dark", String(themeEl.checked));
     window.location.reload();

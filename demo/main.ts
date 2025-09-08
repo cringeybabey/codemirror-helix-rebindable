@@ -16,6 +16,8 @@ window.customElements.define("hx-debug", Debug);
 
 let codemirror: typeof import("./codemirror");
 
+const darkTheme = localStorage.getItem("cm-hx-dark") === "true";
+
 const debugEl = document.querySelector("hx-debug")!;
 let tabGroup: SlTabGroup;
 
@@ -82,6 +84,10 @@ const state = {
 };
 
 {
+  if (darkTheme) {
+    document.documentElement.style.colorScheme = "dark";
+  }
+
   const loaded = Promise.all([
     import("./codemirror").then((mod) => {
       codemirror = mod;
@@ -230,8 +236,13 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
         codemirror.helix({
           config: configFromInput(),
         }),
+        ...(darkTheme ? [codemirror.oneDarkTheme] : []),
         debugPlugin().extension,
-        codemirror.syntaxHighlighting(codemirror.defaultHighlightStyle),
+        codemirror.syntaxHighlighting(
+          darkTheme
+            ? codemirror.oneDarkHighlightStyle
+            : codemirror.defaultHighlightStyle
+        ),
         ...(await chooseSyntax(file)),
         codemirror.lineNumbers(),
         codemirror.commands.of([
@@ -248,7 +259,23 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
             name: "reset",
             help: "Resets all stored documents and settings",
             handler() {
-              localStorage.clear();
+              let index = 0;
+
+              while (true) {
+                const key = localStorage.key(index);
+
+                if (key == null) {
+                  break;
+                }
+
+                if (!key.startsWith("cm-hx-")) {
+                  index++;
+                  continue;
+                }
+
+                localStorage.removeItem(key);
+              }
+
               window.location.reload();
             },
           },
@@ -327,16 +354,22 @@ const optionsEl = document.querySelector("#options")! as HTMLElement;
       }
     }
   }
-}
 
-for (const control of optionsEl.querySelectorAll("[data-option]")) {
-  if (control instanceof HTMLSelectElement) {
-    control.onchange = () => {
-      const config = configFromInput();
-      localStorage.setItem("cm-hx-config", JSON.stringify(config));
-      window.location.reload();
-    };
+  for (const control of optionsEl.querySelectorAll("[data-option]")) {
+    if (control instanceof HTMLSelectElement) {
+      control.onchange = () => {
+        const config = configFromInput();
+        localStorage.setItem("cm-hx-config", JSON.stringify(config));
+        window.location.reload();
+      };
+    }
   }
+
+  const themeEl = optionsEl.querySelector("[name=dark]")! as HTMLInputElement;
+  themeEl.onchange = () => {
+    localStorage.setItem("cm-hx-dark", String(themeEl.checked));
+    window.location.reload();
+  };
 }
 
 function configFromInput() {

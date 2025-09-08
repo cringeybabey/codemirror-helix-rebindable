@@ -15,6 +15,7 @@ export const panelStyles = EditorView.theme({
     justifyContent: "space-between",
     fontFamily: "monospace",
     minHeight: "18px",
+    background: "inherit",
   },
   ".cm-hx-command-input": {
     fontFamily: "monospace",
@@ -24,15 +25,17 @@ export const panelStyles = EditorView.theme({
     padding: "0",
     margin: "0",
     background: "inherit",
+    color: "inherit",
   },
   ".cm-hx-command-popup": {
     position: "fixed",
-    background: "#ccc",
+    background: "inherit",
   },
   ".cm-hx-command-help": {
     border: "1px solid #777",
-    background: "#ddd",
-    padding: "2px",
+    "line-height": "1.5",
+    background: "inherit",
+    padding: "4px 8px",
     whiteSpace: "preserve",
   },
 });

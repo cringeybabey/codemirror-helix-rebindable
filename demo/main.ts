@@ -7,7 +7,7 @@ import { Debug } from "./components/debug";
 
 // @ts-ignore
 import fileNames from "folder:..?names";
-import { pathRegister } from "../src/lib";
+import { pathRegister, themeListener } from "../src/lib";
 
 const filePickerOptions = fileNames.map((value: string) => ({ value }));
 
@@ -16,7 +16,7 @@ window.customElements.define("hx-debug", Debug);
 
 let codemirror: typeof import("./codemirror");
 
-const darkTheme = localStorage.getItem("cm-hx-dark") === "true";
+const currentTheme = localStorage.getItem("cm-hx-theme");
 
 const debugEl = document.querySelector("hx-debug")!;
 let tabGroup: SlTabGroup;
@@ -82,6 +82,28 @@ const state = {
   active: 0,
   callback: () => {},
 };
+
+const themes = [
+  {
+    name: "default",
+    extension: (cm: typeof codemirror) => [
+      cm.syntaxHighlighting(cm.defaultHighlightStyle),
+    ],
+  },
+  {
+    name: "one-dark",
+    extension: (cm: typeof codemirror) => cm.oneDark,
+    dark: true,
+  },
+];
+
+themes.sort((themeA, themeB) =>
+  themeA.name === currentTheme ? -1 : themeB.name === currentTheme ? 1 : 0
+);
+
+const darkTheme =
+  currentTheme != null &&
+  themes.find((theme) => theme.name === currentTheme)?.dark;
 
 {
   if (darkTheme) {
@@ -234,15 +256,20 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
           },
         }),
         codemirror.helix({
+          themes: themes.map((theme) => ({
+            ...theme,
+            extension: theme.extension(codemirror),
+          })),
           config: configFromInput(),
         }),
-        ...(darkTheme ? [codemirror.oneDarkTheme] : []),
+        themeListener.of((theme) => {
+          localStorage.setItem("cm-hx-theme", theme.name);
+
+          if (darkTheme !== Boolean(theme.dark)) {
+            window.location.reload();
+          }
+        }),
         debugPlugin().extension,
-        codemirror.syntaxHighlighting(
-          darkTheme
-            ? codemirror.oneDarkHighlightStyle
-            : codemirror.defaultHighlightStyle
-        ),
         ...(await chooseSyntax(file)),
         codemirror.lineNumbers(),
         codemirror.commands.of([
@@ -364,17 +391,6 @@ const optionsEl = document.querySelector("#options")! as HTMLElement;
       };
     }
   }
-
-  const themeEl = optionsEl.querySelector("[name=dark]")! as HTMLInputElement;
-
-  if (darkTheme) {
-    themeEl.checked = true;
-  }
-
-  themeEl.onchange = () => {
-    localStorage.setItem("cm-hx-dark", String(themeEl.checked));
-    window.location.reload();
-  };
 }
 
 function configFromInput() {

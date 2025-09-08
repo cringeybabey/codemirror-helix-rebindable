@@ -1,4 +1,5 @@
 import {
+  Compartment,
   EditorSelection,
   EditorState,
   StateEffect,
@@ -436,3 +437,20 @@ export function undoSyntaxHistory(state: EditorState) {
     };
   }
 }
+
+export const themeCompartment = new Compartment();
+export const themeEffect = StateEffect.define<string>();
+export const themeField = StateField.define<string>({
+  create() {
+    return "";
+  },
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(themeEffect)) {
+        value = effect.value;
+      }
+    }
+
+    return value;
+  },
+});

@@ -61,6 +61,9 @@ import {
   sameModeState,
   syntaxHistoryEffect,
   syntaxHistoryField,
+  themeCompartment,
+  themeEffect,
+  themeField,
   undoSyntaxHistory,
   yankEffect,
 } from "./state";
@@ -1821,6 +1824,11 @@ export interface Options {
   config?: Config;
 
   /**
+   * Themes accessible from the `:theme` command.
+   */
+  themes?: Array<{ name: string; extension: Extension; dark?: boolean }>;
+
+  /**
    * If provided, sets the extension initial state from a previous state, or a snapshot
    * created by `snapshot()`.
    */
@@ -1840,6 +1848,15 @@ export interface Options {
 export interface Config {
   "editor.cursor-shape.insert"?: "block" | "bar";
 }
+
+const themeFacet = Facet.define<
+  (theme: { name: string; dark?: boolean }) => void
+>({ static: true });
+
+/**
+ * Facet that allows to listen to theme changes.
+ */
+export { themeFacet as themeListener };
 
 /**
  * The main helix extension.
@@ -1865,8 +1882,11 @@ export function helix(options: Options = {}): Extension {
       : options.init
       ? (options.init as any).history
       : undefined;
+  const initialTheme = options.themes?.length ? options.themes[0] : undefined;
 
   return [
+    themeCompartment.of(initialTheme ?? []),
+    ...(initialTheme ? [themeField.init(() => initialTheme.name)] : []),
     EditorView.theme({
       ".cm-hx-block-cursor .cm-cursor": {
         display: "none !important",
@@ -1997,6 +2017,50 @@ export function helix(options: Options = {}): Extension {
           return { message: "Yanked main selection to + register" };
         },
       },
+      ...(options.themes != null && options.themes.length > 0
+        ? [
+            {
+              name: "theme",
+              help: "Change the editor theme (or show the current them if none specified)",
+              handler(view, args) {
+                if (args.length > 1) {
+                  return {
+                    message: `Expected at most 1 argument, got ${args.length}`,
+                    error: true,
+                  };
+                }
+
+                if (args.length === 0) {
+                  return { message: view.state.field(themeField) };
+                }
+
+                const theme = options.themes?.find(
+                  (theme) => theme.name === args[0]
+                );
+
+                if (theme == null) {
+                  return {
+                    message: `Could not load theme ${args[0]}`,
+                    error: true,
+                  };
+                }
+
+                if (theme.extension === themeCompartment.get(view.state)) {
+                  return;
+                }
+
+                view.dispatch({
+                  effects: [
+                    themeCompartment.reconfigure(theme.extension),
+                    themeEffect.of(theme.name),
+                  ],
+                });
+
+                view.state.facet(themeFacet).forEach((cb) => cb(theme));
+              },
+            } satisfies TypableCommand,
+          ]
+        : []),
     ]),
     commands.compute([externalCommandsFacet], (state) => {
       const externalCommands = state.facet(externalCommandsFacet);

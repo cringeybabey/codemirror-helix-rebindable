@@ -13,5 +13,7 @@ export {
   helix,
   globalStateSync,
   resetMode,
+  pathRegister,
+  themeListener,
 } from "../src/lib";
 export { historyField, registersField } from "../src/state";

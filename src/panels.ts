@@ -263,7 +263,9 @@ export class CommandPanel implements Panel {
         this.closeInput();
       },
       onInput: (value) => {
-        const cmd = value.split(/ +/).at(0);
+        const args = value.split(/ +/);
+
+        const cmd = args.at(0);
 
         if (!cmd) {
           this.hidePopup();
@@ -286,26 +288,36 @@ export class CommandPanel implements Panel {
         }
 
         const commands = view.state.facet(this.commandFacet);
-
-        const options = commands.filter(
+        const possibleCommands = commands.filter(
           (command) =>
             command.name.startsWith(cmd) ||
             command.aliases?.some((alias) => alias.startsWith(cmd))
         );
-
-        if (options.length === 0) {
-          this.hidePopup();
-
-          return;
-        }
-
-        const match = options.find(
-          (command) =>
-            command.name === cmd ||
-            command.aliases?.some((alias) => alias === cmd)
+        const command = possibleCommands.find(
+          (command) => command.name === cmd || command.aliases?.includes(cmd)
         );
 
-        this.showPopup(options, match);
+        if (args[1] != null && command && command.autocomplete) {
+          const options = command.autocomplete(args.slice(1));
+          if (options.length === 0) {
+            this.hidePopup();
+
+            return;
+          }
+
+          this.showCommandPopup(options, command);
+        } else {
+          if (possibleCommands.length === 0) {
+            this.hidePopup();
+
+            return;
+          }
+
+          this.showCommandPopup(
+            possibleCommands.map((command) => command.name),
+            command
+          );
+        }
       },
     });
 
@@ -348,22 +360,28 @@ export class CommandPanel implements Panel {
     }
   }
 
-  private showPopup(commands: TypableCommand[], match?: TypableCommand) {
-    this.commandPopup.hidden = false;
-
-    this.help.hidden = !match;
+  private showCommandPopup(options: string[], match?: TypableCommand) {
+    let help = "";
 
     if (match) {
-      this.help.textContent = `${match.help}`;
+      help = `${match.help}`;
 
       if (match.aliases && match.aliases.length > 0) {
-        this.help.textContent += `\nAliases: ${match.aliases.join(",")}`;
+        help += `\nAliases: ${match.aliases.join(",")}`;
       }
-    } else {
-      this.help.textContent = "";
     }
 
-    while (commands.length > this.autocomplete.childNodes.length) {
+    this.showPopup(options, help);
+  }
+
+  private showPopup(options: string[], help?: string) {
+    this.commandPopup.hidden = false;
+
+    this.help.hidden = !help;
+
+    this.help.textContent = help ?? "";
+
+    while (options.length > this.autocomplete.childNodes.length) {
       const entry = $el("span");
       $style(entry, { marginRight: "1em" });
 
@@ -371,16 +389,16 @@ export class CommandPanel implements Panel {
     }
 
     for (const [i, child] of this.autocomplete.childNodes.entries()) {
-      const command = commands[i];
+      const option = options[i];
 
-      if (command) {
-        child.textContent = command.name;
+      if (option) {
+        child.textContent = option;
       } else {
         break;
       }
     }
 
-    while (this.autocomplete.childNodes.length > commands.length) {
+    while (this.autocomplete.childNodes.length > options.length) {
       this.autocomplete.lastChild?.remove();
     }
 

@@ -7,7 +7,7 @@ import { Debug } from "./components/debug";
 
 // @ts-ignore
 import fileNames from "folder:..?names";
-import { pathRegister, themeListener } from "../src/lib";
+import SlTab from "@shoelace-style/shoelace/dist/components/tab/tab.component";
 
 const filePickerOptions = fileNames.map((value: string) => ({ value }));
 
@@ -73,15 +73,26 @@ const debugPlugin = () =>
   });
 
 const state = {
-  editors: new Map<string, { view: EditorView; panel: SlTabPanel }>(),
+  editors: new Map<
+    string,
+    { view: EditorView; panel: SlTabPanel; tab: SlTab }
+  >(),
   tabs: [] as string[],
-  set(file: string, view: EditorView, panel: SlTabPanel) {
+  set(file: string, view: EditorView, panel: SlTabPanel, tab: SlTab) {
     state.tabs.push(file);
-    state.editors.set(file, { view, panel });
+    state.editors.set(file, { view, panel, tab });
   },
   active: 0,
   callback: () => {},
 };
+
+if (import.meta.env.DEV) {
+  Object.defineProperty(window, "state", {
+    get() {
+      return state;
+    },
+  });
+}
 
 const themes = [
   {
@@ -121,7 +132,7 @@ const darkTheme =
     import("folder:.."),
   ]);
 
-  if (process.env.NODE_ENV === "development") {
+  if (import.meta.env.DEV) {
     main("src/lib.ts");
   } else {
     const picker = createPicker(undefined, async (file) => {
@@ -144,14 +155,12 @@ const darkTheme =
 async function createViewPanel(file: string) {
   const name = file.split("/").at(-1)!;
 
-  {
-    const tab = document.createElement("sl-tab");
-    tab.panel = file;
-    tab.textContent = name;
-    tab.slot = "nav";
+  const tab = document.createElement("sl-tab");
+  tab.panel = file;
+  tab.textContent = name;
+  tab.slot = "nav";
 
-    tabGroup.append(tab);
-  }
+  tabGroup.append(tab);
 
   const tabPanel = document.createElement("sl-tab-panel");
   tabPanel.name = file;
@@ -163,7 +172,7 @@ async function createViewPanel(file: string) {
     tabPanel
   );
 
-  state.set(file, view, tabPanel);
+  state.set(file, view, tabPanel, tab);
 
   // seems like we need a tick for `show()` to take effect
   await Promise.resolve();
@@ -177,7 +186,7 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
     state: codemirror.EditorState.create({
       doc,
       extensions: [
-        pathRegister.of(file),
+        codemirror.pathRegister.of(file),
         codemirror.externalCommands.of({
           buffer_picker() {
             const picker = createPicker(view, (value) => {
@@ -225,31 +234,105 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
 
             tabGroup.show(editor.panel.name);
           },
-          ":buffer-close"() {
-            if (state.editors.size <= 1) {
-              return { message: "Unable to close last buffer", error: true };
-            }
+          ":buffer-close": {
+            handler(buffers) {
+              const nonexistent = buffers?.filter(
+                (name) => !state.tabs.includes(name)
+              );
 
-            const index = state.active;
-            const file = state.tabs[index];
-            const last = index === state.editors.size - 1;
-            const next = last ? index - 1 : index + 1;
+              const nonexistentError = nonexistent?.length
+                ? `cannot close non-existent buffers: ${nonexistent.join(", ")}`
+                : undefined;
+              const errorMessage = {
+                message: nonexistentError ?? "Unable to close last buffer",
+                error: true,
+              };
 
-            state.callback = () => {
-              const editor = state.editors.get(file)!;
-              state.editors.delete(file);
+              if (state.editors.size <= 1) {
+                return errorMessage;
+              }
 
-              state.tabs.splice(index, 1);
+              const toClose = buffers?.length
+                ? buffers.flatMap((name) => {
+                    const index = state.tabs.indexOf(name);
+                    return index >= 0
+                      ? [[index, state.tabs[index]] as const]
+                      : [];
+                  })
+                : [[state.active, state.tabs[state.active]] as const];
 
-              state.active = last ? state.tabs.length - 1 : state.active - 1;
+              toClose.sort(([indexA], [indexB]) =>
+                indexA < indexB ? -1 : indexA > indexB ? 1 : 0
+              );
 
-              editor.panel.remove();
-              tabGroup.querySelector(`sl-tab[panel="${file}"]`)?.remove();
+              let closeError = false;
 
-              view.destroy();
-            };
+              if (toClose.length >= state.editors.size) {
+                closeError = true;
 
-            tabGroup.show(state.tabs[next]);
+                toClose.length = state.editors.size - 1;
+              }
+
+              if (toClose.length === 0) {
+                return errorMessage;
+              }
+
+              let next = -1;
+
+              const toCloseSet = new Set(toClose.map(([index]) => index));
+
+              {
+                for (let i = 0; i < state.tabs.length; i++) {
+                  if (toCloseSet.has(i)) {
+                    continue;
+                  }
+
+                  if (i > state.active) {
+                    if (next === -1) {
+                      next = i;
+                    }
+
+                    break;
+                  } else {
+                    next = i;
+                  }
+                }
+              }
+
+              const nextFile = state.tabs[next];
+
+              const callback = () => {
+                for (const [, file] of toClose) {
+                  const editor = state.editors.get(file)!;
+                  state.editors.delete(file);
+
+                  state.tabs.splice(state.tabs.indexOf(file), 1);
+
+                  editor.panel.remove();
+                  editor.tab.remove();
+
+                  editor.view.destroy();
+                }
+
+                state.active = state.tabs.indexOf(nextFile);
+              };
+
+              if (next !== state.active) {
+                state.callback = callback;
+                tabGroup.show(state.tabs[next]);
+              } else {
+                callback();
+              }
+
+              if (closeError) {
+                return errorMessage;
+              }
+            },
+            autocomplete(args) {
+              const last = args.at(-1)!;
+
+              return state.tabs.filter((name) => name.startsWith(last));
+            },
           },
           global_search() {
             return { message: "global search is not implemented", error: true };
@@ -262,7 +345,7 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
           })),
           config: configFromInput(),
         }),
-        themeListener.of((theme) => {
+        codemirror.themeListener.of((theme) => {
           localStorage.setItem("cm-hx-theme", theme.name);
 
           if (darkTheme !== Boolean(theme.dark)) {

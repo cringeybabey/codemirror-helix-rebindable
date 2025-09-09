@@ -1675,14 +1675,17 @@ type ExternalCommand =
   | "file_picker"
   | "buffer_picker"
   | ":buffer-next"
-  | ":buffer-close"
   | ":buffer-previous";
 
-type ExternalCommandHandler = () => CommandPanelMessage | void;
+type ExternalActionHandler = () => CommandPanelMessage | void;
 
 type ExternalCommandsDefinition = Partial<
-  Record<ExternalCommand, ExternalCommandHandler>
+  Record<ExternalCommand, ExternalActionHandler>
 > & {
+  [":buffer-close"]?: {
+    handler(buffers?: string[]): void | CommandPanelMessage;
+    autocomplete?(args: string[]): string[];
+  };
   global_search?(input: string): void | CommandPanelMessage;
 };
 
@@ -1810,6 +1813,8 @@ export interface TypableCommand {
   name: string;
   aliases?: string[];
   help: string;
+
+  autocomplete?: (args: string[]) => string[];
 
   /**
    * The handler for the command. The return type can specify a message,
@@ -2022,6 +2027,17 @@ export function helix(options: Options = {}): Extension {
             {
               name: "theme",
               help: "Change the editor theme (or show the current them if none specified)",
+              autocomplete([themeName, extra]) {
+                if (extra) {
+                  return [];
+                }
+
+                return (
+                  options.themes?.flatMap((theme) =>
+                    theme.name.startsWith(themeName) ? [theme.name] : []
+                  ) ?? []
+                );
+              },
               handler(view, args) {
                 if (args.length > 1) {
                   return {
@@ -2068,21 +2084,37 @@ export function helix(options: Options = {}): Extension {
       const hardcodedCommands: Array<[ExternalCommand, string, string[]]> = [
         [":buffer-next", "Goto next buffer", ["bn", "bnext"]],
         [":buffer-previous", "Goto previous buffer", ["bp", "bprev"]],
-        [":buffer-close", "Close the current buffer", ["bc", "bclose"]],
       ];
 
-      return hardcodedCommands
-        .filter(([name]) => !!externalCommands[name])
-        .map(([name, help, aliases]) => ({
-          name: name.slice(1),
-          aliases,
-          help,
-          handler(view: EditorView) {
-            const defs = view.state.facet(externalCommandsFacet);
+      const bufferClose = externalCommands[":buffer-close"]
+        ? ({
+            name: "buffer-close",
+            aliases: ["bc", "bclose"],
+            help: "Close the current buffer",
+            autocomplete: externalCommands[":buffer-close"].autocomplete,
+            handler(view, args) {
+              const defs = view.state.facet(externalCommandsFacet);
 
-            return defs[name]?.();
-          },
-        }));
+              return defs[":buffer-close"]?.handler(args);
+            },
+          } satisfies TypableCommand)
+        : undefined;
+
+      return [
+        ...hardcodedCommands
+          .filter(([name]) => !!externalCommands[name])
+          .map(([name, help, aliases]) => ({
+            name: name.slice(1),
+            aliases,
+            help,
+            handler(view: EditorView) {
+              const defs = view.state.facet(externalCommandsFacet);
+
+              return defs[name]?.();
+            },
+          })),
+        ...(bufferClose ? [bufferClose] : []),
+      ];
     }),
   ];
 }

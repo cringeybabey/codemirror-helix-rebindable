@@ -18,7 +18,7 @@ import {
   Extension,
   Facet,
   type Range,
-  type SelectionRange,
+  SelectionRange,
   type StateEffect,
   type Text,
   Transaction,
@@ -78,7 +78,7 @@ import {
 import {
   MODE_EFF,
   ViewProxy,
-  atomicRange,
+  rangeIsAtomic,
   changeCase,
   cmSelToInternal,
   cmdCount,
@@ -106,9 +106,10 @@ import {
   rotateSelection,
   changeNumber,
   yanksForSelection,
-  fixAtomicRange,
   yank,
   extendToDelimiters,
+  nextClusterBreak,
+  rangeIsForward,
 } from "./commands";
 import { backwardsSearch } from "./search";
 
@@ -874,7 +875,7 @@ const helixCommandBindings: {
     ["Alt-;"](view) {
       view.dispatch({
         selection: mapSel(view.state.selection, (range) =>
-          atomicRange(range, view.state.doc)
+          rangeIsAtomic(range, view.state.doc)
             ? range
             : EditorSelection.range(range.head, range.anchor)
         ),
@@ -884,7 +885,7 @@ const helixCommandBindings: {
     ["Alt-:"](view) {
       view.dispatch({
         selection: mapSel(view.state.selection, (range) =>
-          atomicRange(range, view.state.doc)
+          rangeIsAtomic(range, view.state.doc)
             ? range
             : EditorSelection.range(range.from, range.to)
         ),
@@ -1377,30 +1378,61 @@ function moveByGroup(view: EditorView, mode: NormalLikeMode, forward: boolean) {
   const normal = mode.type === ModeType.Normal;
 
   const tr = view.state.changeByRange((range) => {
-    let nextAnchor = normal ? range.head : range.anchor;
-    let nextHead = view.moveByGroup(
-      EditorSelection.cursor(range.head),
-      forward
-    ).anchor;
+    const rangeForward = rangeIsForward(range);
+    const [headCursor, anchorCursor] = rangeIsAtomic(range, view.state.doc)
+      ? [range, range]
+      : [
+          EditorSelection.range(
+            nextClusterBreak(view.state.doc, range.head, !rangeForward),
+            range.head
+          ),
+          EditorSelection.range(
+            range.anchor,
+            nextClusterBreak(view.state.doc, range.anchor, rangeForward)
+          ),
+        ];
 
-    let fixed = fixAtomicRange(
-      EditorSelection.range(nextAnchor, nextHead),
-      view.state.doc
-    );
-    if (nextAnchor === nextHead || fixed.eq(range)) {
+    let nextAnchor = forward ? headCursor.from : headCursor.to;
+
+    let nextHead = view.moveByGroup(
+      EditorSelection.cursor(nextAnchor),
+      forward
+    ).head;
+
+    const oldEnd = forward ? headCursor.to : headCursor.from;
+
+    if (nextHead === oldEnd) {
+      nextAnchor = nextHead;
+
       nextHead = view.moveByGroup(
-        EditorSelection.cursor(range.anchor),
+        EditorSelection.cursor(nextAnchor),
         forward
-      ).anchor;
+      ).head;
     }
 
-    fixed = fixAtomicRange(
-      EditorSelection.range(nextAnchor, nextHead),
-      view.state.doc
-    );
+    const nextRange = EditorSelection.range(nextAnchor, nextHead);
+
+    if (!normal) {
+      const nextHeadCursor = rangeIsAtomic(nextRange, view.state.doc)
+        ? nextRange
+        : EditorSelection.range(
+            nextClusterBreak(view.state.doc, nextRange.head, !forward),
+            nextRange.head
+          );
+      [nextAnchor, nextHead] =
+        nextHeadCursor.to < anchorCursor.from
+          ? [anchorCursor.to, nextHeadCursor.from]
+          : [anchorCursor.from, nextHeadCursor.to];
+
+      const range = EditorSelection.range(nextAnchor, nextHead);
+
+      return {
+        range,
+      };
+    }
 
     return {
-      range: fixed,
+      range: nextRange,
     };
   });
 

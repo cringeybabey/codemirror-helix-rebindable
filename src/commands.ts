@@ -76,7 +76,7 @@ export function cmSelToInternal(range: SelectionRange, doc: Text) {
   }
 
   const end = nextClusterBreak(doc, range.to, false);
-  const [anchor, head] = rangeForward(range)
+  const [anchor, head] = rangeIsForward(range)
     ? [range.from, end]
     : [end, range.from];
 
@@ -131,7 +131,7 @@ export function removeText(
 
 export function internalSelToCM(range: SelectionRange, doc: Text) {
   const end = nextClusterBreak(doc, range.to, true);
-  const [anchor, head] = rangeForward(range)
+  const [anchor, head] = rangeIsForward(range)
     ? [range.from, end]
     : [end, range.from];
 
@@ -615,7 +615,7 @@ export function surround(view: EditorView, char: string) {
 
   const tr = view.state.changeByRange((range) => {
     const [anchor, head] =
-      rangeForward(range) || range.empty
+      rangeIsForward(range) || range.empty
         ? [range.anchor, range.head + offset]
         : [range.anchor + offset, range.head];
 
@@ -719,7 +719,7 @@ export function extendToDelimiters(
     }
 
     const [anchor, head] =
-      rangeForward(range) || atomicRange(range, view.state.doc)
+      rangeIsForward(range) || rangeIsAtomic(range, view.state.doc)
         ? [start.from, end.to]
         : [end.to, start.from];
 
@@ -1016,22 +1016,11 @@ export function resetCount(mode: NonInsertMode) {
   return modeEffect.of(rest);
 }
 
-function rangeForward(range: SelectionRange) {
+export function rangeIsForward(range: SelectionRange) {
   return range.head > range.from;
 }
 
-export function fixAtomicRange(range: SelectionRange, doc: Text) {
-  if (rangeForward(range) || !atomicRange(range, doc)) {
-    return range;
-  }
-
-  return cloneRange(range, {
-    anchor: range.head,
-    head: range.anchor,
-  });
-}
-
-export function atomicRange(range: SelectionRange, doc: Text) {
+export function rangeIsAtomic(range: SelectionRange, doc: Text) {
   const len = range.to - range.from;
 
   if (len <= 1) {
@@ -1046,10 +1035,6 @@ export function atomicRange(range: SelectionRange, doc: Text) {
   }
 }
 
-export function rangeLen(range: SelectionRange) {
-  return range.to - range.from;
-}
-
 export function cloneRange(
   range: SelectionRange,
   override: Partial<SelectionRange>
@@ -1062,8 +1047,8 @@ export function cloneRange(
   );
 }
 
-function nextClusterBreak(doc: Text, pos: number, forward: boolean) {
-  if ((!forward && pos === 0) || (forward && pos === doc.length)) {
+export function nextClusterBreak(doc: Text, pos: number, forward: boolean) {
+  if (pos === (forward ? doc.length : 0)) {
     return pos;
   }
 

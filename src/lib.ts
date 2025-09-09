@@ -56,6 +56,7 @@ import {
   readClipboard,
   readRegister,
   registersField,
+  registersHistoryField,
   resetMode,
   sameMode,
   sameModeState,
@@ -71,6 +72,7 @@ import {
   CommandPanel,
   CommandPanelMessage,
   panelStyles,
+  panelTheme,
   statusPanel,
 } from "./panels";
 import {
@@ -126,6 +128,8 @@ function startSearch(view: EditorView, mode: SearchMode) {
   }
 
   return {
+    // FIXME: this is not correct. We should join the contents of the register here
+    // and keep the multi-selection in case somebody pastes from '/'
     init: view.state.field(registersField)["/"]?.toString() ?? "",
     onInput(input_: string) {
       if (input !== input_) {
@@ -220,7 +224,7 @@ function startSearch(view: EditorView, mode: SearchMode) {
 
       if (mode === SearchMode.Global) {
         const externalCommands = view.state.facet(externalCommandsFacet);
-        const query = input || view.state.field(registersField)["/"];
+        const query = input || readRegister(view.state, "/");
 
         if (query) {
           return externalCommands.global_search?.(query.toString());
@@ -1768,6 +1772,7 @@ export const pathRegister = Facet.define<
 export function snapshot(state: EditorState, global = false): Object {
   return {
     registers: state.field(registersField),
+    registersHistory: state.field(registersHistoryField),
     ...(global
       ? {}
       : {
@@ -1784,7 +1789,12 @@ export function snapshot(state: EditorState, global = false): Object {
 export function globalStateSync(state: EditorState): TransactionSpec[] {
   return [
     {
-      effects: yankEffect.of({ reset: state.field(registersField) }),
+      effects: yankEffect.of({
+        reset: {
+          values: state.field(registersField),
+          history: state.field(registersHistoryField),
+        },
+      }),
     },
   ];
 }
@@ -1795,7 +1805,11 @@ export function globalStateSync(state: EditorState): TransactionSpec[] {
  */
 export const commands = Facet.define<TypableCommand[], TypableCommand[]>({
   combine(commands) {
-    return commands.flat();
+    const combined = commands.flat();
+
+    return combined.sort((cmdA, cmdB) =>
+      cmdA.name < cmdB.name ? -1 : cmdA.name > cmdB.name ? 1 : 0
+    );
   },
 });
 
@@ -1872,13 +1886,13 @@ export function helix(options: Options = {}): Extension {
   const cursorShape =
     options?.config?.["editor.cursor-shape.insert"] ?? "block";
 
-  const registerState = options.globalInit ?? options.init;
+  const globalState = options.globalInit ?? options.init;
 
   const initialRegisters =
-    registerState instanceof EditorState
-      ? registerState.field(registersField)
-      : registerState
-      ? (registerState as any).registers
+    globalState instanceof EditorState
+      ? globalState.field(registersField)
+      : globalState
+      ? (globalState as any).registers
       : undefined;
 
   const initialHistory =
@@ -1887,11 +1901,26 @@ export function helix(options: Options = {}): Extension {
       : options.init
       ? (options.init as any).history
       : undefined;
+
+  const initialRegistersHistory =
+    globalState instanceof EditorState
+      ? globalState.field(registersHistoryField)
+      : globalState
+      ? (globalState as any).registersHistory
+      : undefined;
+
   const initialTheme = options.themes?.length ? options.themes[0] : undefined;
 
   return [
-    themeCompartment.of(initialTheme ?? []),
-    ...(initialTheme ? [themeField.init(() => initialTheme.name)] : []),
+    ...(initialTheme
+      ? [
+          themeField.init(() => initialTheme.name),
+          themeCompartment.of([
+            initialTheme.extension,
+            initialTheme.dark ? panelTheme.dark : panelTheme.light,
+          ]),
+        ]
+      : [panelTheme.light]),
     EditorView.theme({
       ".cm-hx-block-cursor .cm-cursor": {
         display: "none !important",
@@ -1901,6 +1930,7 @@ export function helix(options: Options = {}): Extension {
       },
     }),
     panelStyles,
+    ...(initialTheme ? [] : [panelTheme.light]),
     drawSelection({
       cursorBlinkRate: 0,
       drawRangeCursor: cursorShape === "bar",
@@ -1911,6 +1941,9 @@ export function helix(options: Options = {}): Extension {
     initialRegisters
       ? registersField.init(() => initialRegisters)
       : registersField,
+    initialRegistersHistory
+      ? registersHistoryField.init(() => initialRegistersHistory)
+      : registersHistoryField,
     searchFacet.from(registersField, (registers) => registers["/"]?.toString()),
     unhandledCommandsFilter,
     selectByClickFilter,
@@ -2022,21 +2055,56 @@ export function helix(options: Options = {}): Extension {
           return { message: "Yanked main selection to + register" };
         },
       },
+      {
+        name: "clear-register",
+        help: "Clear given register. If no argument is provided, clear all registers",
+        // FIXME: autocomplete
+        handler(view, args) {
+          if (args.length > 1) {
+            return {
+              message: `Expected at most 1 argument, got ${args.length}`,
+              error: true,
+            };
+          }
+
+          if (args.length === 0) {
+            const registers = view.state.field(registersField);
+
+            view.dispatch({
+              effects: Object.keys(registers).map((reg) =>
+                yankEffect.of([reg, []])
+              ),
+            });
+          } else {
+            // FIXME: not unicode length
+            if (args[0].length > 1) {
+              return { message: `invalid register ${args[0]}`, error: true };
+            }
+
+            view.dispatch({
+              effects: yankEffect.of([args[0], []]),
+            });
+          }
+        },
+      },
       ...(options.themes != null && options.themes.length > 0
         ? [
             {
               name: "theme",
               help: "Change the editor theme (or show the current them if none specified)",
-              autocomplete([themeName, extra]) {
+              autocomplete([_themeName, extra]) {
                 if (extra) {
                   return [];
                 }
 
-                return (
-                  options.themes?.flatMap((theme) =>
-                    theme.name.startsWith(themeName) ? [theme.name] : []
-                  ) ?? []
-                );
+                return [];
+
+                // FIXME: implement autocomplete for successive arguments
+                // return (
+                //   options.themes?.flatMap((theme) =>
+                //     theme.name.startsWith(themeName) ? [theme.name] : []
+                //   ) ?? []
+                // );
               },
               handler(view, args) {
                 if (args.length > 1) {
@@ -2061,13 +2129,21 @@ export function helix(options: Options = {}): Extension {
                   };
                 }
 
-                if (theme.extension === themeCompartment.get(view.state)) {
+                const currentThemeExtensions = themeCompartment.get(view.state);
+
+                if (
+                  Array.isArray(currentThemeExtensions) &&
+                  currentThemeExtensions.includes(theme.extension)
+                ) {
                   return;
                 }
 
                 view.dispatch({
                   effects: [
-                    themeCompartment.reconfigure(theme.extension),
+                    themeCompartment.reconfigure([
+                      theme.extension,
+                      theme.dark ? panelTheme.dark : panelTheme.light,
+                    ]),
                     themeEffect.of(theme.name),
                   ],
                 });

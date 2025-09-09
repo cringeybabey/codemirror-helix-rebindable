@@ -100,9 +100,15 @@ function minorModeStr(minor: MinorMode) {
 
 export const yankEffect = StateEffect.define<
   | [string, Array<string | Text>]
-  | { reset: Record<string, Array<string | Text>> }
+  | {
+      reset: {
+        values: Record<string, Array<string | Text>>;
+        history: Record<string, Array<string | Text>>;
+      };
+    }
 >();
 
+// FIXME: handle '+'
 export function readRegister(state: EditorState, register?: string) {
   switch (register) {
     case "#": {
@@ -151,10 +157,21 @@ export const registersField = StateField.define<
     for (const effect of tr.effects) {
       if (effect.is(yankEffect)) {
         if (!Array.isArray(effect.value)) {
-          return effect.value.reset;
+          registers = effect.value.reset.values;
+
+          if (process.env.NODE_ENV === "development") {
+            const regs = new Set(Object.keys(registers));
+
+            if (["_", "%", ".", "#"].some((reg) => regs.has(reg))) {
+              console.error(`unexpected read-only register`);
+            }
+          }
+
+          continue;
         }
 
-        const [reg, value] = effect.value;
+        const [reg] = effect.value;
+        let [, value] = effect.value;
 
         switch (reg) {
           case "_":
@@ -164,13 +181,18 @@ export const registersField = StateField.define<
             return registers;
           }
 
+          case ":": {
+            value = value.length ? [value[0]] : [];
+
+            break;
+          }
           case "+": {
             navigator.clipboard.writeText(
               // FIXME: proper line ending?
               value.map((yank) => yank.toString()).join("\n")
             );
 
-            // fall through
+            break;
           }
         }
 
@@ -181,6 +203,55 @@ export const registersField = StateField.define<
         } else {
           registers = { ...registers, [reg]: value };
         }
+      }
+    }
+
+    return registers;
+  },
+});
+
+export const registersHistoryField = StateField.define<
+  Record<string, Array<string | Text>>
+>({
+  create() {
+    return {};
+  },
+  update(registers, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(yankEffect)) {
+        if (!Array.isArray(effect.value)) {
+          registers = effect.value.reset.history;
+          continue;
+        }
+
+        const [reg] = effect.value;
+        let [, value] = effect.value;
+
+        switch (reg) {
+          case ":": {
+            value = value.length ? [value[0]] : [];
+
+            break;
+          }
+          case "/": {
+            break;
+          }
+
+          default: {
+            continue;
+          }
+        }
+
+        if (value.length === 0) {
+          continue;
+        }
+
+        const { [reg]: current, ...rest } = registers;
+
+        registers = {
+          [reg]: [...(current ?? []), value[0]],
+          ...rest,
+        };
       }
     }
 

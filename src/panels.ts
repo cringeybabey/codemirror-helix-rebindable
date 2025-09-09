@@ -1,8 +1,19 @@
 import { EditorView, Panel } from "@codemirror/view";
-import { EditorSelection, FacetReader } from "@codemirror/state";
+import {
+  EditorSelection,
+  type FacetReader,
+  type Text,
+} from "@codemirror/state";
 import type { TypableCommand } from "./lib";
-import { modeStatus, readRegister, yankEffect } from "./state";
+import {
+  modeStatus,
+  readRegister,
+  registersHistoryField,
+  yankEffect,
+} from "./state";
 import { ModeState, SearchMode } from "./entities";
+
+const MOUNT_EVENT = "cm-hx-input-mounted";
 
 export const panelStyles = EditorView.theme({
   ".cm-hx-status-panel": {
@@ -11,10 +22,13 @@ export const panelStyles = EditorView.theme({
     "font-family": "monospace",
   },
   ".cm-hx-command-panel": {
-    display: "flex",
-    justifyContent: "space-between",
     fontFamily: "monospace",
     minHeight: "18px",
+    background: "inherit",
+  },
+  ".cm-hx-command-panel-flex": {
+    display: "flex",
+    justifyContent: "space-between",
     background: "inherit",
   },
   ".cm-hx-command-input": {
@@ -27,9 +41,20 @@ export const panelStyles = EditorView.theme({
     background: "inherit",
     color: "inherit",
   },
-  ".cm-hx-command-popup": {
-    position: "fixed",
+  ".cm-hx-command-autocomplete": {
+    display: "grid",
+    "grid-template-columns": "repeat(auto-fill, minmax(10em, 1fr))",
+    gap: "1px 0px",
+  },
+  ".cm-hx-command-popup-wrapper": {
+    width: "100%",
     background: "inherit",
+    position: "relative",
+  },
+  ".cm-hx-command-popup": {
+    position: "absolute",
+    background: "inherit",
+    width: "inherit",
   },
   ".cm-hx-command-help": {
     border: "1px solid #777",
@@ -39,6 +64,19 @@ export const panelStyles = EditorView.theme({
     whiteSpace: "preserve",
   },
 });
+
+export const panelTheme = {
+  light: EditorView.theme({
+    ".cm-hx-selected-option": {
+      background: "#ccc",
+    },
+  }),
+  dark: EditorView.theme({
+    ".cm-hx-selected-option": {
+      background: "#777",
+    },
+  }),
+};
 
 export type CommandPanelMessage = {
   message: string;
@@ -68,13 +106,22 @@ export class CommandPanel implements Panel {
   ) {
     this.dom = $el("div") as any;
 
+    const popupWrapper = $el("div");
+    popupWrapper.classList.add("cm-hx-command-popup-wrapper");
+
+    const flex = $el("div");
+    flex.classList.add("cm-hx-command-panel-flex");
+
     this.minorCommand = $el("span");
     this.inputContainer = $el("span");
     this.commandPopup = $el("div");
 
-    this.dom.append(this.inputContainer);
-    this.dom.append(this.minorCommand);
-    this.dom.append(this.commandPopup);
+    popupWrapper.append(this.commandPopup);
+    flex.append(this.inputContainer);
+    flex.append(this.minorCommand);
+
+    this.dom.append(flex);
+    this.dom.append(popupWrapper);
 
     this.dom.classList.add("cm-hx-command-panel");
 
@@ -123,6 +170,7 @@ export class CommandPanel implements Panel {
     this.inputContainer.append(input);
     $style(this.inputContainer, { visibility: "" });
 
+    input.dispatchEvent(new Event(MOUNT_EVENT));
     input.focus();
   }
 
@@ -131,17 +179,31 @@ export class CommandPanel implements Panel {
     onClose,
     placeholder,
     onKeyDown,
+    getPopup,
+    getHistory,
   }: {
     onInput: (value: string) => void;
     onClose: (commit: boolean, value: string) => void;
     onKeyDown?: (event: KeyboardEvent) => void;
+    getPopup: (value: string) => { help?: string; options: string[] };
+    getHistory(): Array<string | Text> | undefined;
     placeholder?: string;
   }) {
     const input = $el("input") as HTMLInputElement;
 
+    let currentPopup: ReturnType<typeof getPopup> | undefined;
+    let selected: number | undefined;
+    let historyEntry: number = -1;
+
     if (onKeyDown) {
       input.addEventListener("keydown", onKeyDown);
     }
+
+    input.addEventListener(MOUNT_EVENT, () => {
+      currentPopup = getPopup(input.value);
+
+      this.showPopup(currentPopup.options, currentPopup.help, undefined);
+    });
 
     if (placeholder) {
       input.placeholder = placeholder;
@@ -154,11 +216,19 @@ export class CommandPanel implements Panel {
 
     input.addEventListener("blur", () => {
       if (open) {
+        this.hidePopup();
+        selected = undefined;
         onClose(false, input.value);
       }
     });
 
     input.addEventListener("input", () => {
+      selected = undefined;
+
+      currentPopup = getPopup(input.value);
+
+      this.showPopup(currentPopup.options, currentPopup.help, undefined);
+
       onInput(input.value);
     });
 
@@ -172,7 +242,48 @@ export class CommandPanel implements Panel {
       if (isEnter || event.key === "Escape") {
         open = false;
 
+        this.hidePopup();
+        selected = undefined;
         onClose(isEnter, input.value);
+      } else if (event.key === "Tab" && currentPopup?.options.length) {
+        event.preventDefault();
+
+        const forward = !event.shiftKey;
+
+        if (selected != null) {
+          selected =
+            (selected + (forward ? 1 : -1) + currentPopup.options.length) %
+            currentPopup.options.length;
+        } else {
+          selected = forward ? 0 : currentPopup.options.length - 1;
+        }
+
+        const selectedOption = currentPopup.options[selected];
+        const nextPopup = getPopup(selectedOption);
+        currentPopup = { ...nextPopup, options: currentPopup.options };
+
+        this.showPopup(currentPopup.options, currentPopup.help, selected);
+
+        input.value = selectedOption;
+        onInput(input.value);
+      } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        const history = getHistory() ?? [];
+
+        const next = historyEntry + (event.key === "ArrowUp" ? 1 : -1);
+
+        if (next >= 0 && next < history.length) {
+          historyEntry = next;
+
+          const value = history[history.length - 1 - historyEntry].toString();
+
+          currentPopup = getPopup(value);
+
+          this.showPopup(currentPopup.options, currentPopup.help, selected);
+
+          input.value = value;
+          input.selectionStart = value.length;
+        }
       }
     });
 
@@ -189,9 +300,9 @@ export class CommandPanel implements Panel {
 
     let readingRegister = false;
 
-    // FIXME: tab completion
     const input = this.createInput({
       placeholder: readRegister(view.state, ":")?.at(0)?.toString(),
+      getHistory: () => this.view.state.field(registersHistoryField)[":"],
       onKeyDown(e) {
         if (e.isComposing) {
           return;
@@ -215,8 +326,6 @@ export class CommandPanel implements Panel {
         e.preventDefault();
       },
       onClose: (commit, value) => {
-        this.hidePopup();
-
         if (commit && value) {
           view.dispatch({
             effects: yankEffect.of([":", [value]]),
@@ -268,7 +377,6 @@ export class CommandPanel implements Panel {
         const cmd = args.at(0);
 
         if (!cmd) {
-          this.hidePopup();
           return;
         }
 
@@ -286,6 +394,15 @@ export class CommandPanel implements Panel {
 
           return;
         }
+      },
+      getPopup: (value) => {
+        const args = value.split(/ +/);
+
+        const cmd = args.at(0);
+
+        if (cmd == null) {
+          return { options: [] };
+        }
 
         const commands = view.state.facet(this.commandFacet);
         const possibleCommands = commands.filter(
@@ -297,26 +414,30 @@ export class CommandPanel implements Panel {
           (command) => command.name === cmd || command.aliases?.includes(cmd)
         );
 
+        function commandToHelp(command: TypableCommand) {
+          let help = "";
+
+          if (command) {
+            help = `${command.help}`;
+
+            if (command.aliases && command.aliases.length > 0) {
+              help += `\nAliases: ${command.aliases.join(", ")}`;
+            }
+          }
+
+          return help;
+        }
+
+        const help = command != null ? commandToHelp(command) : undefined;
+
         if (args[1] != null && command && command.autocomplete) {
           const options = command.autocomplete(args.slice(1));
-          if (options.length === 0) {
-            this.hidePopup();
-
-            return;
-          }
-
-          this.showCommandPopup(options, command);
+          return { options, help };
         } else {
-          if (possibleCommands.length === 0) {
-            this.hidePopup();
-
-            return;
-          }
-
-          this.showCommandPopup(
-            possibleCommands.map((command) => command.name),
-            command
-          );
+          return {
+            options: possibleCommands.map((command) => command.name),
+            help,
+          };
         }
       },
     });
@@ -360,21 +481,13 @@ export class CommandPanel implements Panel {
     }
   }
 
-  private showCommandPopup(options: string[], match?: TypableCommand) {
-    let help = "";
+  private showPopup(options: string[], help?: string, selected?: number) {
+    if (options.length === 0) {
+      this.hidePopup();
 
-    if (match) {
-      help = `${match.help}`;
-
-      if (match.aliases && match.aliases.length > 0) {
-        help += `\nAliases: ${match.aliases.join(",")}`;
-      }
+      return;
     }
 
-    this.showPopup(options, help);
-  }
-
-  private showPopup(options: string[], help?: string) {
     this.commandPopup.hidden = false;
 
     this.help.hidden = !help;
@@ -393,6 +506,7 @@ export class CommandPanel implements Panel {
 
       if (option) {
         child.textContent = option;
+        (child as HTMLElement).style.order = "";
       } else {
         break;
       }
@@ -400,6 +514,15 @@ export class CommandPanel implements Panel {
 
     while (this.autocomplete.childNodes.length > options.length) {
       this.autocomplete.lastChild?.remove();
+    }
+
+    const current = this.autocomplete.querySelector(".cm-hx-selected-option");
+    current?.classList.remove("cm-hx-selected-option");
+
+    if (selected != null) {
+      this.autocomplete.children[selected].classList.add(
+        "cm-hx-selected-option"
+      );
     }
 
     if (this.popupRequest == null) {
@@ -418,12 +541,38 @@ export class CommandPanel implements Panel {
       return;
     }
 
-    const box = this.inputContainer.getBoundingClientRect();
+    const inputBox = this.inputContainer.getBoundingClientRect();
+    const wrapperBox = this.commandPopup.parentElement!.getBoundingClientRect();
 
     $style(this.commandPopup, {
-      bottom: `${window.innerHeight - box.top}px`,
-      left: `${box.left}px`,
+      bottom: `${wrapperBox.top - inputBox.top}px`,
+      left: "0px",
     });
+
+    let i = -1;
+
+    const base = this.autocomplete.children.item(0)!.getBoundingClientRect().x;
+
+    for (let index = 1; index < this.autocomplete.children.length; index++) {
+      const child = this.autocomplete.children.item(index)!;
+
+      if (child.getBoundingClientRect().x === base) {
+        i = index;
+        break;
+      }
+    }
+
+    const width = i < 0 ? 1 : i;
+
+    let order = 0;
+
+    for (let i = 0; i < width; i++) {
+      for (let j = i; j < this.autocomplete.children.length; j += width) {
+        (this.autocomplete.children.item(order) as HTMLElement).style.order =
+          String(j);
+        order++;
+      }
+    }
   }
 
   private searchInput(mode: SearchMode) {
@@ -431,12 +580,26 @@ export class CommandPanel implements Panel {
 
     return this.createInput({
       placeholder: search.init,
+      getHistory: () => this.view.state.field(registersHistoryField)["/"],
       onClose: (commit) => {
         this.showMessageAndCloseInput(search.onClose(commit));
       },
 
       onInput: (value) => {
         search.onInput(value);
+      },
+
+      getPopup: (value) => {
+        const history = this.view.state.field(registersHistoryField)["/"] ?? [];
+
+        const options = history.flatMap((entry) => {
+          const text = entry.toString();
+          return text.startsWith(value) ? [text] : [];
+        });
+
+        options.sort();
+
+        return { options };
       },
     });
   }

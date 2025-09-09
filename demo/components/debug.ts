@@ -16,7 +16,7 @@ export class Debug extends HTMLElement {
     }
 
     this.innerHTML = `
-      <div>regs <code id="register"></code></div>
+      <div>regs: <code id="register"></code></div>
       <div>range: &emsp;<code id="selection"></code></div>
       <div>history: &emsp;<code id="history"></code></div>
     `;
@@ -28,7 +28,7 @@ export class Debug extends HTMLElement {
 
   set registers(registers: any) {
     this.#register.textContent = Object.entries(registers)
-      .map(([reg, value]) => `${reg} ${value}`)
+      .map(([reg, value]) => `<${reg}> => ${value}`)
       .join("\n");
   }
 

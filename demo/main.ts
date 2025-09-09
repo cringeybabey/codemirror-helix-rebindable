@@ -389,10 +389,18 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
               window.location.reload();
             },
           },
+          ...Array.from({ length: import.meta.env.DEV ? 20 : 0 }, (_, i) => {
+            return {
+              name: `test-${i}`,
+              help: `Test command #${i}`,
+              handler() {
+                return { message: "handled" };
+              },
+            };
+          }),
         ]),
       ],
     }),
-    extensions: [],
     parent,
     root: document,
   });

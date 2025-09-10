@@ -125,7 +125,9 @@ const darkTheme =
     import("./codemirror").then((mod) => {
       codemirror = mod;
 
-      (window as any).codemirror = codemirror;
+      if (import.meta.env.DEV) {
+        (window as any).codemirror = codemirror;
+      }
     }),
     import("./shoelace").then(() => initShoelace()),
     // @ts-ignore

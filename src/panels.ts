@@ -32,6 +32,7 @@ export const panelStyles = EditorView.theme({
     background: "inherit",
   },
   ".cm-hx-command-input": {
+    "flex-grow": 100,
     fontFamily: "monospace",
     fontSize: "inherit",
     border: "none",
@@ -125,7 +126,11 @@ export class CommandPanel implements Panel {
 
     this.dom.classList.add("cm-hx-command-panel");
 
-    $style(this.inputContainer, { visibility: "hidden" });
+    $style(this.inputContainer, {
+      visibility: "hidden",
+      flexGrow: "1",
+      display: "flex",
+    });
     this.label = $el("span");
     this.inputContainer.append(this.label);
 
@@ -181,6 +186,7 @@ export class CommandPanel implements Panel {
     onKeyDown,
     getPopup,
     getHistory,
+    accept,
   }: {
     onInput: (value: string) => void;
     onClose: (commit: boolean, value: string) => void;
@@ -188,6 +194,7 @@ export class CommandPanel implements Panel {
     getPopup: (value: string) => { help?: string; options: string[] };
     getHistory(): Array<string | Text> | undefined;
     placeholder?: string;
+    accept?: (value: string) => string | undefined;
   }) {
     const input = $el("input") as HTMLInputElement;
 
@@ -250,6 +257,8 @@ export class CommandPanel implements Panel {
 
         const forward = !event.shiftKey;
 
+        const prev = selected;
+
         if (selected != null) {
           selected =
             (selected + (forward ? 1 : -1) + currentPopup.options.length) %
@@ -258,13 +267,15 @@ export class CommandPanel implements Panel {
           selected = forward ? 0 : currentPopup.options.length - 1;
         }
 
-        const selectedOption = currentPopup.options[selected];
-        const nextPopup = getPopup(selectedOption);
-        currentPopup = { ...nextPopup, options: currentPopup.options };
+        if (prev !== selected) {
+          const selectedOption = currentPopup.options[selected];
+          const nextPopup = getPopup(selectedOption);
+          currentPopup = { ...nextPopup, options: currentPopup.options };
 
-        this.showPopup(currentPopup.options, currentPopup.help, selected);
+          this.showPopup(currentPopup.options, currentPopup.help, selected);
 
-        input.value = selectedOption;
+          input.value = accept?.(selectedOption) ?? selectedOption;
+        }
         onInput(input.value);
       } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         event.preventDefault();
@@ -298,6 +309,7 @@ export class CommandPanel implements Panel {
 
     const isNumber = (cmd: string) => /^\d+$/.test(cmd);
 
+    // FIXME: autocomplete
     let readingRegister = false;
 
     const input = this.createInput({
@@ -396,6 +408,7 @@ export class CommandPanel implements Panel {
         }
       },
       getPopup: (value) => {
+        // FIXME: no quoting whatsoever
         const args = value.split(/ +/);
 
         const cmd = args.at(0);
@@ -439,6 +452,17 @@ export class CommandPanel implements Panel {
             help,
           };
         }
+      },
+      accept(value) {
+        const last = input.value.split(/ +/).at(-1);
+
+        if (last == null) {
+          return undefined;
+        }
+
+        return (
+          input.value.slice(0, input.value.length - last.length) + `${value}`
+        );
       },
     });
 

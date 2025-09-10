@@ -15,5 +15,6 @@ export {
   resetMode,
   pathRegister,
   themeListener,
+  changeTheme,
 } from "../src/lib";
 export { historyField, registersField } from "../src/state";

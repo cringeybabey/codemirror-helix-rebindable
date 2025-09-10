@@ -1915,6 +1915,14 @@ const themeFacet = Facet.define<
 export { themeFacet as themeListener };
 
 /**
+ * Changes the theme of the editor. It needs to be pre-configured
+ * in `themes` (see `Options`).
+ */
+export function changeTheme(view: EditorView, theme: string) {
+  view.dispatch({ effects: themeEffect.of(theme) });
+}
+
+/**
  * The main helix extension.
  *
  * It provides Helix-like keybindings, plus two panels to emulate the statusline and the commandline.
@@ -2124,24 +2132,28 @@ export function helix(options: Options = {}): Extension {
           }
         },
       },
+      {
+        name: "echo",
+        help: "Prints the given argumens to the statusline.",
+        handler(_view, args) {
+          return { message: args.join(" ") };
+        },
+      },
       ...(options.themes != null && options.themes.length > 0
         ? [
             {
               name: "theme",
               help: "Change the editor theme (or show the current them if none specified)",
-              autocomplete([_themeName, extra]) {
+              autocomplete([themeName, extra]) {
                 if (extra) {
                   return [];
                 }
 
-                return [];
-
-                // FIXME: implement autocomplete for successive arguments
-                // return (
-                //   options.themes?.flatMap((theme) =>
-                //     theme.name.startsWith(themeName) ? [theme.name] : []
-                //   ) ?? []
-                // );
+                return (
+                  options.themes?.flatMap((theme) =>
+                    theme.name.startsWith(themeName) ? [theme.name] : []
+                  ) ?? []
+                );
               },
               handler(view, args) {
                 if (args.length > 1) {

@@ -1643,6 +1643,11 @@ const unhandledCommandsFilter = EditorState.transactionFilter.from(
             return tr;
           }
 
+          // unrelated: prevent drag and drop
+          if (userEvent === "input.drop" || userEvent === "move.drop") {
+            return [];
+          }
+
           if (!userEvent.startsWith("input")) {
             return tr;
           }

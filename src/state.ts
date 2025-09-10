@@ -2,6 +2,7 @@ import {
   Compartment,
   EditorSelection,
   EditorState,
+  Extension,
   StateEffect,
   StateField,
   Text,
@@ -511,14 +512,17 @@ export function undoSyntaxHistory(state: EditorState) {
 
 export const themeCompartment = new Compartment();
 export const themeEffect = StateEffect.define<string>();
-export const themeField = StateField.define<string>({
+export const themeField = StateField.define<{
+  current: string;
+  themes: Array<{ name: string; dark?: boolean; extension: Extension }>;
+}>({
   create() {
-    return "";
+    return {} as any;
   },
   update(value, tr) {
     for (const effect of tr.effects) {
       if (effect.is(themeEffect)) {
-        value = effect.value;
+        value = { ...value, current: effect.value };
       }
     }
 

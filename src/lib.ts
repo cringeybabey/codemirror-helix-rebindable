@@ -1918,8 +1918,50 @@ export { themeFacet as themeListener };
  * Changes the theme of the editor. It needs to be pre-configured
  * in `themes` (see `Options`).
  */
-export function changeTheme(view: EditorView, theme: string) {
-  view.dispatch({ effects: themeEffect.of(theme) });
+export { changeThemeAction as changeTheme };
+
+function changeThemeAction(view: EditorView, theme: string) {
+  const result = changeTheme(view, theme, false);
+
+  if (result && result.error) {
+    console.warn(result.message);
+  }
+}
+
+function changeTheme(view: EditorView, theme: string, notify = true) {
+  const { themes } = view.state.field(themeField);
+
+  const themeObj = themes.find((themeObj) => themeObj.name === theme);
+
+  if (!themeObj) {
+    return {
+      message: `'theme': Could not load theme: ${theme}`,
+      error: true,
+    };
+  }
+
+  const currentThemeExtensions = themeCompartment.get(view.state);
+
+  if (
+    Array.isArray(currentThemeExtensions) &&
+    currentThemeExtensions.includes(themeObj.extension)
+  ) {
+    return;
+  }
+
+  view.dispatch({
+    effects: [
+      themeCompartment.reconfigure([
+        themeObj.extension,
+        themeObj.dark ? panelTheme.dark : panelTheme.light,
+      ]),
+      themeEffect.of(theme),
+    ],
+  });
+
+  if (notify) {
+    view.state.facet(themeFacet).forEach((cb) => cb(themeObj));
+  }
 }
 
 /**
@@ -1959,7 +2001,10 @@ export function helix(options: Options = {}): Extension {
   return [
     ...(initialTheme
       ? [
-          themeField.init(() => initialTheme.name),
+          themeField.init(() => ({
+            current: initialTheme.name,
+            themes: options.themes!,
+          })),
           themeCompartment.of([
             initialTheme.extension,
             initialTheme.dark ? panelTheme.dark : panelTheme.light,
@@ -2164,40 +2209,10 @@ export function helix(options: Options = {}): Extension {
                 }
 
                 if (args.length === 0) {
-                  return { message: view.state.field(themeField) };
+                  return { message: view.state.field(themeField).current };
                 }
 
-                const theme = options.themes?.find(
-                  (theme) => theme.name === args[0]
-                );
-
-                if (theme == null) {
-                  return {
-                    message: `Could not load theme ${args[0]}`,
-                    error: true,
-                  };
-                }
-
-                const currentThemeExtensions = themeCompartment.get(view.state);
-
-                if (
-                  Array.isArray(currentThemeExtensions) &&
-                  currentThemeExtensions.includes(theme.extension)
-                ) {
-                  return;
-                }
-
-                view.dispatch({
-                  effects: [
-                    themeCompartment.reconfigure([
-                      theme.extension,
-                      theme.dark ? panelTheme.dark : panelTheme.light,
-                    ]),
-                    themeEffect.of(theme.name),
-                  ],
-                });
-
-                view.state.facet(themeFacet).forEach((cb) => cb(theme));
+                return changeTheme(view, args[0]);
               },
             } satisfies TypableCommand,
           ]

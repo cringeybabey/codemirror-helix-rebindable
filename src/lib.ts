@@ -1807,9 +1807,12 @@ export const pathRegister = Facet.define<
  * it is slimmer, but it is only valid for `globalInit`.
  */
 export function snapshot(state: EditorState, global = false): Object {
+  const theme = state.field(themeField, false);
+
   return {
     registers: state.field(registersField),
     registersHistory: state.field(registersHistoryField),
+    theme: theme?.current,
     ...(global
       ? {}
       : {
@@ -1824,14 +1827,24 @@ export function snapshot(state: EditorState, global = false): Object {
  * with `state`.
  */
 export function globalStateSync(state: EditorState): TransactionSpec[] {
+  const theme = state.field(themeField, false);
+
+  const resetRegisters = yankEffect.of({
+    reset: {
+      values: state.field(registersField),
+      history: state.field(registersHistoryField),
+    },
+  });
+
   return [
     {
-      effects: yankEffect.of({
-        reset: {
-          values: state.field(registersField),
-          history: state.field(registersHistoryField),
-        },
-      }),
+      effects: theme
+        ? [
+            resetRegisters,
+            themeEffect.of(theme.current),
+            themeCompartment.reconfigure(themeCompartment.get(state)!),
+          ]
+        : resetRegisters,
     },
   ];
 }
@@ -2011,7 +2024,12 @@ export function helix(options: Options = {}): Extension {
       ? (globalState as any).registersHistory
       : undefined;
 
-  const initialThemeName = options.config?.theme;
+  const initialThemeName =
+    globalState instanceof EditorState
+      ? globalState.field(themeField, false)?.current
+      : globalState
+      ? (globalState as any).theme
+      : options.config?.theme;
 
   if (initialThemeName != null && !options.themes?.length) {
     throw new Error(

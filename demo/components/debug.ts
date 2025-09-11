@@ -9,6 +9,7 @@ export class Debug extends HTMLElement {
   #register: HTMLDivElement;
   #history: HTMLDivElement;
   #selection: HTMLDivElement;
+  #theme: HTMLDivElement;
 
   connectedCallback() {
     if (this.#register) {
@@ -16,11 +17,13 @@ export class Debug extends HTMLElement {
     }
 
     this.innerHTML = `
+      <div> <abbr title="Change it using the :theme command">theme</abbr>: <code id="theme"></code></div>
       <div>regs: <code id="register"></code></div>
       <div>range: &emsp;<code id="selection"></code></div>
       <div>history: &emsp;<code id="history"></code></div>
     `;
 
+    this.#theme = this.querySelector("#theme")!;
     this.#register = this.querySelector("#register")!;
     this.#history = this.querySelector("#history")!;
     this.#selection = this.querySelector("#selection")!;
@@ -52,5 +55,9 @@ export class Debug extends HTMLElement {
     } cursor: ${
       history.cursor
     } head: ${!!history.head} pending: ${!!history.pending}`;
+  }
+
+  set theme(theme: any) {
+    this.#theme.textContent = theme;
   }
 }

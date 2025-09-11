@@ -16,7 +16,11 @@ window.customElements.define("hx-debug", Debug);
 
 let codemirror: typeof import("./codemirror");
 
-const currentTheme = localStorage.getItem("cm-hx-theme");
+let currentTheme =
+  localStorage.getItem("cm-hx-theme") ??
+  (window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "one-dark"
+    : "default");
 
 const debugEl = document.querySelector("hx-debug")!;
 let tabGroup: SlTabGroup;
@@ -106,11 +110,22 @@ const themes = [
     extension: (cm: typeof codemirror) => cm.oneDark,
     dark: true,
   },
+  {
+    name: "solarized-light",
+    extension: () => () =>
+      import("@ddietr/codemirror-themes/solarized-light").then(
+        (mod) => mod.solarizedLight
+      ),
+  },
+  {
+    name: "tokio-night",
+    extension: () => () =>
+      import("@ddietr/codemirror-themes/tokyo-night").then(
+        (mod) => mod.tokyoNight
+      ),
+    dark: true,
+  },
 ];
-
-themes.sort((themeA, themeB) =>
-  themeA.name === currentTheme ? -1 : themeB.name === currentTheme ? 1 : 0
-);
 
 const darkTheme =
   currentTheme != null &&
@@ -184,6 +199,8 @@ async function createViewPanel(file: string) {
 }
 
 async function createView(file: string, doc: string, parent: HTMLElement) {
+  debugEl.theme = currentTheme;
+
   const view = new codemirror.EditorView({
     state: codemirror.EditorState.create({
       doc,
@@ -345,12 +362,14 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
             ...theme,
             extension: theme.extension(codemirror),
           })),
-          config: configFromInput(),
+          config: { ...configFromInput(), theme: currentTheme },
         }),
         codemirror.themeListener.of((theme) => {
           localStorage.setItem("cm-hx-theme", theme.name);
+          debugEl.theme = theme.name;
+          currentTheme = theme.name;
 
-          if (darkTheme !== Boolean(theme.dark)) {
+          if (Boolean(darkTheme) !== Boolean(theme.dark)) {
             window.location.reload();
           }
         }),

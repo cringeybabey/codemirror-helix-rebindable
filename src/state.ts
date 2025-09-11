@@ -514,7 +514,11 @@ export const themeCompartment = new Compartment();
 export const themeEffect = StateEffect.define<string>();
 export const themeField = StateField.define<{
   current: string;
-  themes: Array<{ name: string; dark?: boolean; extension: Extension }>;
+  themes: Array<{
+    name: string;
+    dark?: boolean;
+    extension: Extension | (() => Promise<Extension>);
+  }>;
 }>({
   create() {
     return {} as any;

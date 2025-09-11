@@ -1882,7 +1882,11 @@ export interface Options {
   /**
    * Themes accessible from the `:theme` command.
    */
-  themes?: Array<{ name: string; extension: Extension; dark?: boolean }>;
+  themes?: Array<{
+    name: string;
+    extension: Extension | (() => Promise<Extension>);
+    dark?: boolean;
+  }>;
 
   /**
    * If provided, sets the extension initial state from a previous state, or a snapshot
@@ -1902,6 +1906,10 @@ export interface Options {
  * The names follow Helix's options' naming.
  */
 export interface Config {
+  /**
+   * If provided, it must be one of the themes provided in `Options.themes`.
+   */
+  theme?: string;
   "editor.cursor-shape.insert"?: "block" | "bar";
 }
 
@@ -1949,19 +1957,26 @@ function changeTheme(view: EditorView, theme: string, notify = true) {
     return;
   }
 
-  view.dispatch({
-    effects: [
-      themeCompartment.reconfigure([
-        themeObj.extension,
-        themeObj.dark ? panelTheme.dark : panelTheme.light,
-      ]),
-      themeEffect.of(theme),
-    ],
-  });
+  const promise =
+    typeof themeObj.extension === "function"
+      ? themeObj.extension()
+      : Promise.resolve(themeObj.extension);
 
-  if (notify) {
-    view.state.facet(themeFacet).forEach((cb) => cb(themeObj));
-  }
+  promise.then((extension) => {
+    view.dispatch({
+      effects: [
+        themeCompartment.reconfigure([
+          extension,
+          themeObj.dark ? panelTheme.dark : panelTheme.light,
+        ]),
+        themeEffect.of(theme),
+      ],
+    });
+
+    if (notify) {
+      view.state.facet(themeFacet).forEach((cb) => cb(themeObj));
+    }
+  });
 }
 
 /**
@@ -1996,21 +2011,55 @@ export function helix(options: Options = {}): Extension {
       ? (globalState as any).registersHistory
       : undefined;
 
-  const initialTheme = options.themes?.length ? options.themes[0] : undefined;
+  const initialThemeName = options.config?.theme;
+
+  if (initialThemeName != null && !options.themes?.length) {
+    throw new Error(
+      "options.config.theme only takes effect if options.themes was provided."
+    );
+  }
+
+  const initialTheme = initialThemeName
+    ? options.themes?.find((theme) => theme.name === initialThemeName)
+    : options.themes?.[0];
+
+  if (initialThemeName && !initialTheme) {
+    throw new Error(`Unknown theme ${initialThemeName}`);
+  }
+
+  const initialThemeExtension =
+    typeof initialTheme?.extension === "function"
+      ? undefined
+      : initialTheme?.extension;
+
+  const themeExtensions = initialTheme
+    ? [
+        themeField.init(() => ({
+          current: initialTheme.name,
+          themes: options.themes!,
+        })),
+      ]
+    : [panelTheme.light];
+
+  if (initialThemeExtension) {
+    themeExtensions.push(
+      themeCompartment.of([
+        initialThemeExtension,
+        initialTheme!.dark ? panelTheme.dark : panelTheme.light,
+      ])
+    );
+  } else if (initialTheme) {
+    themeExtensions.push([
+      themeCompartment.of([panelTheme.light]),
+      ViewPlugin.define((view) => {
+        changeTheme(view, initialTheme.name, false);
+        return {};
+      }),
+    ]);
+  }
 
   return [
-    ...(initialTheme
-      ? [
-          themeField.init(() => ({
-            current: initialTheme.name,
-            themes: options.themes!,
-          })),
-          themeCompartment.of([
-            initialTheme.extension,
-            initialTheme.dark ? panelTheme.dark : panelTheme.light,
-          ]),
-        ]
-      : [panelTheme.light]),
+    ...themeExtensions,
     EditorView.theme({
       ".cm-hx-block-cursor .cm-cursor": {
         display: "none !important",
@@ -2020,7 +2069,6 @@ export function helix(options: Options = {}): Extension {
       },
     }),
     panelStyles,
-    ...(initialTheme ? [] : [panelTheme.light]),
     drawSelection({
       cursorBlinkRate: 0,
       drawRangeCursor: cursorShape === "bar",

@@ -346,7 +346,7 @@ export class CommandPanel implements Panel {
           value = readRegister(view.state, ":")?.at(0)?.toString() ?? "";
         }
 
-        const [cmd, ...args] = value.split(/ +/);
+        const [cmd, ...args] = value.trimEnd().split(/ +/);
 
         if (commit && cmd) {
           const commands = view.state.facet(this.commandFacet);

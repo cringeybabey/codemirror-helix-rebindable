@@ -186,12 +186,15 @@ export function cursorToLineEnd(
   const select = mode.type === ModeType.Select;
 
   view.dispatch({
-    selection: mapSel(view.state.selection, (range) =>
-      internalSelToCM(
-        cursorToLineEndRange(range, view, insert ? ModeType.Insert : mode.type),
-        view.state.doc
-      )
-    ),
+    selection: mapSel(view.state.selection, (range) => {
+      const next = cursorToLineEndRange(
+        range,
+        view,
+        insert ? ModeType.Insert : mode.type
+      );
+
+      return insert ? next : internalSelToCM(next, view.state.doc);
+    }),
     effects: insert
       ? MODE_EFF.INSERT
       : select

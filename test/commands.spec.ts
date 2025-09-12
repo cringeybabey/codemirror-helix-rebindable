@@ -168,6 +168,15 @@ const cases: Case[] = [
     },
   ],
   [
+    "insert at line end, editing",
+    "abc\nxyz\n",
+    ["A", "u", "Escape"],
+    {
+      selection: [5, 4],
+      text: "abcu\nxyz\n",
+    },
+  ],
+  [
     "insert at line end, on line end",
     "abc\nxyz",
     ["A", "Escape", "A", "Escape"],

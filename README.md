@@ -66,6 +66,12 @@ In a multi-editor setup, you will probably need to sync some global state betwee
 
 See the code for the [playground](https://_rvidal.gitlab.io/codemirror-helix/) in [`demo/main.ts`](demo/main.ts) for an example of a multi-editor setup.
 
+## Contributing
+
+You need to "sign off" your commits with `git commit -s` to indicate that you agree to the [Developer Certificate of Origin](https://developercertificate.org/), also reproduced in-tree [here](etc/DCO.txt).
+
+Please be aware that, most likely, this forbids LLM-assisted contributions.
+
 ## License
 
 [Mozilla Public License 2.0](LICENSE)

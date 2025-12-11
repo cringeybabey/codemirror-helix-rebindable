@@ -1,5 +1,8 @@
 # codemirror-helix
 
+<a href="https://www.npmjs.com/package/codemirror-helix" target="_blank"><img src="https://flat.badgen.net/npm/v/codemirror-helix" /></a>
+<a href="https://gitlab.com/_rvidal/codemirror-helix" target="_blank"><img src="https://flat.badgen.net/badge/icon/gitlab?icon=gitlab&label" /></a>
+
 A [Codemirror](https://codemirror.net/) plugin for [Helix](https://helix-editor.com/) keybindings and general UX.
 
 ## Installation
@@ -68,9 +71,7 @@ See the code for the [playground](https://_rvidal.gitlab.io/codemirror-helix/) i
 
 ## Contributing
 
-You need to "sign off" your commits with `git commit -s` to indicate that you agree to the [Developer Certificate of Origin](https://developercertificate.org/), also reproduced in-tree [here](etc/DCO.txt).
-
-Please be aware that, most likely, this forbids LLM-assisted contributions.
+See [CONTRIBUTING](etc/CONTRIBUTING.md).
 
 ## License
 

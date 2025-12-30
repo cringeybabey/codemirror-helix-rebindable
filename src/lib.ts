@@ -85,6 +85,7 @@ import {
   countCommands,
   cursorToLineEnd,
   cursorToLineStart,
+  cursorToFirstNonBlank,
   insertLine,
   openLine,
   internalSelToCM,
@@ -1171,6 +1172,7 @@ const helixCommandBindings: {
       });
     },
     ["l"]: cursorToLineEnd,
+    ["s"]: cursorToFirstNonBlank,
     ["n"](view, mode) {
       const externalCommandDefs = view.state.facet(externalCommandsFacet);
 

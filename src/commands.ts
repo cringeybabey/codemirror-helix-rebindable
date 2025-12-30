@@ -155,6 +155,32 @@ export function cursorToLineStart(view: EditorView, mode: NonInsertMode) {
   });
 }
 
+export function cursorToFirstNonBlank(view: EditorView, mode: NonInsertMode) {
+  const isNormal = mode.type === ModeType.Normal;
+
+  const newSelection = mapSel(view.state.selection, (range) => {
+    const selection = cmSelToInternal(range, view.state.doc);
+    const doc = view.state.doc;
+
+    const line = doc.lineAt(selection.head);
+
+    const firstNonWhitespace = line.text.match(/\S/)?.index ?? 0;
+    const absolutePos = line.from + firstNonWhitespace;
+
+    const next = isNormal
+      ? EditorSelection.cursor(absolutePos)
+      : EditorSelection.range(selection.anchor, absolutePos);
+
+    return internalSelToCM(next, doc);
+  });
+
+  view.dispatch({
+    effects: isNormal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
+    selection: newSelection,
+    scrollIntoView: true,
+  });
+}
+
 function cursorToLineEndRange(
   range: SelectionRange,
   view: ViewLike,

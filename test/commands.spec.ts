@@ -39,6 +39,7 @@ const cases: Record<string, Case> = {
     ["g", "l", "l", "g", "l"],
     { selection: [3, 2] },
   ],
+  "moves to first non-whitespace": ["  foo", ["g", "s"], { selection: [3, 2] }],
   "deletes a line": [["foo", "bar"], ["x", "d"], "bar"],
   "selects lines": [["foo", "bar", "baz"], ["x", "x"], { selection: [0, 8] }],
   "reverse selection": ["foo", ["x", "Alt-;"], { selection: [3, 0] }],

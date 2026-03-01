@@ -1904,6 +1904,14 @@ export interface Options {
   }>;
 
   /**
+   * Whether to include the `drawSelection` extension. Defaults to `true`.
+   * Set to `false` if you want to provide your own `drawSelection`
+   * configuration or your CodeMirror environment already includes drawSelection
+   * (e.g. Obsidian).
+   */
+  drawSelection?: boolean;
+
+  /**
    * If provided, sets the extension initial state from a previous state, or a snapshot
    * created by `snapshot()`.
    */
@@ -2089,10 +2097,14 @@ export function helix(options: Options = {}): Extension {
       },
     }),
     panelStyles,
-    drawSelection({
-      cursorBlinkRate: 0,
-      drawRangeCursor: cursorShape === "bar",
-    }),
+    ...(options?.drawSelection !== false
+      ? [
+          drawSelection({
+            cursorBlinkRate: 0,
+            drawRangeCursor: cursorShape === "bar",
+          }),
+        ]
+      : []),
     helixKeymap,
     modeField,
     initialHistory ? historyField.init(() => initialHistory) : historyField,

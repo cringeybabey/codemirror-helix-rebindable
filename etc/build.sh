@@ -1,4 +1,4 @@
-#!/bin/env sh
+#!/usr/bin/env sh
 
 ENV_VAR=process.env.NODE_ENV
 

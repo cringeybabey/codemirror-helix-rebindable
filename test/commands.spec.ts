@@ -187,6 +187,14 @@ const cases: Record<string, Case> = {
       selection: [4, 3],
     },
   ],
+  "insert at start of the line": [
+    ["abc", "  xyz", "uvw"],
+    ["j", "I", "a", "Escape"],
+    {
+      selection: [8, 7],
+      text: ["abc", "  axyz", "uvw"],
+    },
+  ],
   "go to last line": [
     ["abc", "xyz"],
     ["g", "e"],

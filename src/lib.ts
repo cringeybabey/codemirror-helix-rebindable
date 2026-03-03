@@ -440,8 +440,9 @@ const helixCommandBindings: {
         view.dispatch({
           effects: MODE_EFF.INSERT,
           selection: mapSel(view.state.selection, (range) => {
-            // TODO: line start takes into account whitespace
-            const start = view.state.doc.lineAt(range.from).from;
+            const line = view.state.doc.lineAt(range.from);
+            const firstNonWhitespace = line.text.match(/\S/)?.index ?? 0;
+            const start = line.from + firstNonWhitespace;
 
             return EditorSelection.cursor(start);
           }),

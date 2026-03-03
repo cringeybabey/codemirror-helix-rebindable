@@ -13,7 +13,7 @@ With Node.js and `npm` installed:
 npm i
 
 # Run the demo playground (with livereloading)
-npm run dev
+npm run demo
 
 # Build the package
 npm run build

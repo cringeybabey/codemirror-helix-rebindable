@@ -17,6 +17,8 @@ import {
   EditorState,
   Extension,
   Facet,
+  countColumn,
+  findColumn,
   type Range,
   SelectionRange,
   type StateEffect,
@@ -447,6 +449,76 @@ const helixCommandBindings: {
             return EditorSelection.cursor(start);
           }),
         });
+      },
+    },
+    ["C"]: {
+      checkpoint: true,
+
+      command(view) {
+        const { state } = view;
+
+        const main = state.selection.main;
+
+        const currentLine = state.doc.lineAt(main.head);
+
+        if (currentLine.number >= state.doc.lines) return false;
+
+        const col = countColumn(
+          currentLine.text,
+
+          state.tabSize,
+
+          main.head - currentLine.from
+        );
+
+        const anchorCol = countColumn(
+          currentLine.text,
+
+          state.tabSize,
+
+          main.anchor - currentLine.from
+        );
+
+        for (
+          let lineNum = currentLine.number + 1;
+          lineNum <= state.doc.lines;
+          lineNum++
+        ) {
+          const line = state.doc.line(lineNum);
+
+          const newHeadOff = findColumn(line.text, col, state.tabSize, true);
+
+          if (newHeadOff < 0) continue;
+
+          const newAnchorOff = findColumn(
+            line.text,
+
+            anchorCol,
+
+            state.tabSize,
+
+            true
+          );
+
+          if (newAnchorOff < 0) continue;
+
+          const newHead = line.from + newHeadOff;
+
+          const newAnchor = line.from + newAnchorOff;
+
+          const range =
+            main.head < main.anchor
+              ? EditorSelection.range(newHead, newAnchor)
+              : EditorSelection.range(newAnchor, newHead);
+
+          view.dispatch({
+            selection: state.selection.addRange(range, true),
+
+            userEvent: "select",
+          });
+
+          break;
+        }
       },
     },
     ["c"]: {
@@ -1355,6 +1427,15 @@ const helixCommandBindings: {
         effects:
           mode.type === ModeType.Normal ? MODE_EFF.NORMAL : MODE_EFF.SELECT,
       });
+    },
+    ["c"]: {
+      checkpoint: true,
+
+      command(view) {
+        view.dispatch({ effects: MODE_EFF.NORMAL });
+
+        toggleComment(view);
+      },
     },
   },
   leftBracket: {

@@ -223,6 +223,17 @@ const cases: Record<string, Case> = {
       selection: [9, 8],
     },
   ],
+  "duplicate cursor": [
+    ["hello world", "helix rocks"],
+    ["w", "C", "C", "d"],
+    {
+      selection: [
+        [1, 0],
+        [8, 7],
+      ],
+      text: [" world", " rocks"],
+    },
+  ],
 };
 
 describe("codemirror-helix", () => {

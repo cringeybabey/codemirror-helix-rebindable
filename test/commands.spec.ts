@@ -21,6 +21,8 @@ const SLOW = false;
 // Represents text as a string or optionally as an array of lines
 type Text = string | string[];
 
+type Source = Text | { lang: string; source: Text };
+
 // How to write a test case
 //
 // A test case is just an array with:
@@ -29,8 +31,8 @@ type Text = string | string[];
 // Optionally, the array can have one more element, a boolean as the first field
 // to single out focused tests (a la `it.only()`).
 type Case =
-  | [Text, string[], Expectation]
-  | [boolean, Text, string[], Expectation];
+  | [Source, string[], Expectation]
+  | [boolean, Source, string[], Expectation];
 
 const cases: Record<string, Case> = {
   "moves to line end": [["foo", "bar"], ["g", "l"], { selection: [3, 2] }],
@@ -234,6 +236,13 @@ const cases: Record<string, Case> = {
       text: [" world", " rocks"],
     },
   ],
+  "expand selection": [
+    { lang: "js", source: ["const hello = 'world';"] },
+    ["f", "e", ";", "Alt-o"],
+    {
+      selection: [11, 6],
+    },
+  ],
 };
 
 describe("codemirror-helix", () => {
@@ -242,14 +251,14 @@ describe("codemirror-helix", () => {
 
   for (const [title, case_] of casesList) {
     let only = !skipping;
-    let text: Text;
+    let source: Source;
     let commands: string[];
     let expected: Expectation;
 
     if (case_.length === 4) {
-      [only, text, commands, expected] = case_ as any;
+      [only, source, commands, expected] = case_ as any;
     } else {
-      [text, commands, expected] = case_ as any;
+      [source, commands, expected] = case_ as any;
     }
 
     const keys = toKeys(commands);
@@ -259,7 +268,7 @@ describe("codemirror-helix", () => {
     itFn(title, async () => {
       await browser.url("http://localhost:45183");
 
-      await initEditor(text);
+      await initEditor(source);
 
       for (const key of keys) {
         await (SLOW ? wait(1000) : undefined);
@@ -298,11 +307,18 @@ async function wait(timeout: number) {
   await new Promise<void>((res) => setTimeout(() => res(), timeout));
 }
 
-async function initEditor(text: Text) {
+async function initEditor(source: Source) {
+  const [text, lang] =
+    typeof source === "string" || Array.isArray(source)
+      ? [source, null]
+      : [source.source, source.lang];
+
   await expect($(".ready")).toBePresent();
 
   return browser.execute(
-    `return initEditor(${JSON.stringify(textToString(text))})`
+    `return initEditor(${JSON.stringify(textToString(text))}, ${JSON.stringify(
+      lang
+    )})`
   );
 }
 

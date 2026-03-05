@@ -1,21 +1,28 @@
 import { EditorView } from "@codemirror/view";
 import { helix } from "../";
-import { EditorState } from "@codemirror/state";
+import { EditorState, type Extension } from "@codemirror/state";
+import { javascript } from "@codemirror/lang-javascript";
 
 declare global {
   interface Window {
     view?: EditorView;
-    initEditor(doc: string): void;
+    initEditor(doc: string, lang: string | null): void;
   }
 }
 
+const languages: Record<string, () => Extension> = {
+  js: javascript,
+};
+
 let view: EditorView | null = null;
 
-function initEditor(doc: string) {
+function initEditor(doc: string, lang: string | null) {
+  const language = lang != null ? languages[lang] : null;
+
   view = new EditorView({
     doc,
     parent: document.querySelector("#editor")!,
-    extensions: [helix()],
+    extensions: [helix(), ...(language ? [language()] : [])],
   });
 
   view.focus();

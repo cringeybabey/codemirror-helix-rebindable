@@ -966,6 +966,7 @@ const helixCommandBindings: {
       });
     },
     ["Alt-ArrowUp"](view) {
+      // FIXME: selection direction
       expandSyntaxHistory(
         view.state,
         (start, dispatch) => {

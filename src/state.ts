@@ -29,25 +29,16 @@ export const modeField = StateField.define<ModeState>({
   },
 });
 
-export function resetMode(
-  mode: NonInsertMode,
-  override?: Partial<NonInsertMode>
-) {
+export function resetMode(mode: NonInsertMode, override?: Partial<NonInsertMode>) {
   return modeEffect.of({ type: mode.type, minor: mode.minor, ...override });
 }
 
-export function overwriteMode(
-  mode: NonInsertMode,
-  override?: Partial<NonInsertMode>
-) {
+export function overwriteMode(mode: NonInsertMode, override?: Partial<NonInsertMode>) {
   return modeEffect.of({ ...mode, ...override });
 }
 
 export function sameMode(mode: ModeState, otherMode: ModeState) {
-  return (
-    mode.type === otherMode.type &&
-    (mode as any).minor === (otherMode as any).minor
-  );
+  return mode.type === otherMode.type && (mode as any).minor === (otherMode as any).minor;
 }
 
 export function sameModeState(mode: ModeState, otherMode: ModeState) {
@@ -119,9 +110,7 @@ export function readRegister(state: EditorState, register?: string) {
       return [];
     }
     case ".": {
-      return state.selection.ranges.map((range) =>
-        state.sliceDoc(range.from, range.to)
-      );
+      return state.selection.ranges.map((range) => state.sliceDoc(range.from, range.to));
     }
     case "%": {
       const path = state.facet(pathRegister);
@@ -148,9 +137,7 @@ export async function readClipboard(state: EditorState) {
   return [copied];
 }
 
-export const registersField = StateField.define<
-  Record<string, Array<string | Text>>
->({
+export const registersField = StateField.define<Record<string, Array<string | Text>>>({
   create() {
     return {};
   },

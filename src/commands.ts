@@ -76,9 +76,7 @@ export function cmSelToInternal(range: SelectionRange, doc: Text) {
   }
 
   const end = nextClusterBreak(doc, range.to, false);
-  const [anchor, head] = rangeIsForward(range)
-    ? [range.from, end]
-    : [end, range.from];
+  const [anchor, head] = rangeIsForward(range) ? [range.from, end] : [end, range.from];
 
   return EditorSelection.range(
     anchor,
@@ -131,9 +129,7 @@ export function removeText(
 
 export function internalSelToCM(range: SelectionRange, doc: Text) {
   const end = nextClusterBreak(doc, range.to, true);
-  const [anchor, head] = rangeIsForward(range)
-    ? [range.from, end]
-    : [end, range.from];
+  const [anchor, head] = rangeIsForward(range) ? [range.from, end] : [end, range.from];
 
   return EditorSelection.range(
     anchor,
@@ -181,11 +177,7 @@ export function cursorToFirstNonBlank(view: EditorView, mode: NonInsertMode) {
   });
 }
 
-function cursorToLineEndRange(
-  range: SelectionRange,
-  view: ViewLike,
-  mode: ModeType
-) {
+function cursorToLineEndRange(range: SelectionRange, view: ViewLike, mode: ModeType) {
   const selection = cmSelToInternal(range, view.state.doc);
 
   const line = view.state.doc.lineAt(selection.head);
@@ -195,20 +187,14 @@ function cursorToLineEndRange(
   }
 
   const goal =
-    mode === ModeType.Insert
-      ? line.to
-      : nextClusterBreak(view.state.doc, line.to, false);
+    mode === ModeType.Insert ? line.to : nextClusterBreak(view.state.doc, line.to, false);
 
   return mode === ModeType.Select
     ? EditorSelection.range(selection.anchor, goal, selection.goalColumn)
     : EditorSelection.cursor(goal, undefined, undefined, selection.goalColumn);
 }
 
-export function cursorToLineEnd(
-  view: ViewLike,
-  mode: NonInsertMode,
-  insert?: boolean
-) {
+export function cursorToLineEnd(view: ViewLike, mode: NonInsertMode, insert?: boolean) {
   const select = mode.type === ModeType.Select;
 
   view.dispatch({
@@ -221,11 +207,7 @@ export function cursorToLineEnd(
 
       return insert ? next : internalSelToCM(next, view.state.doc);
     }),
-    effects: insert
-      ? MODE_EFF.INSERT
-      : select
-      ? MODE_EFF.SELECT
-      : MODE_EFF.NORMAL,
+    effects: insert ? MODE_EFF.INSERT : select ? MODE_EFF.SELECT : MODE_EFF.NORMAL,
   });
 
   return true;
@@ -273,16 +255,9 @@ function selectByChar(view: EditorView, mode: NonInsertMode, forward: boolean) {
           }
         : undefined;
 
-    const next = view.moveByChar(
-      EditorSelection.cursor(initial.head),
-      forward,
-      by
-    );
+    const next = view.moveByChar(EditorSelection.cursor(initial.head), forward, by);
 
-    return internalSelToCM(
-      EditorSelection.range(initial.anchor, next.head),
-      doc
-    );
+    return internalSelToCM(EditorSelection.range(initial.anchor, next.head), doc);
   });
 }
 
@@ -307,11 +282,7 @@ function selectByLine(view: EditorView, mode: NonInsertMode, forward: boolean) {
     }
 
     return internalSelToCM(
-      EditorSelection.range(
-        initial.anchor,
-        selection.head,
-        selection.goalColumn
-      ),
+      EditorSelection.range(initial.anchor, selection.head, selection.goalColumn),
       doc
     );
   });
@@ -349,16 +320,10 @@ function cursorByLine(view: EditorView, mode: NonInsertMode, forward: boolean) {
   });
 }
 
-export function moveByHalfPage(
-  view: EditorView,
-  mode: NonInsertMode,
-  forward: boolean
-) {
+export function moveByHalfPage(view: EditorView, mode: NonInsertMode, forward: boolean) {
   const select = mode.type === ModeType.Select;
 
-  const next = select
-    ? selectByHalfPage(view, forward)
-    : cursorByHalfPage(view, forward);
+  const next = select ? selectByHalfPage(view, forward) : cursorByHalfPage(view, forward);
 
   if (next.eq(view.state.selection)) {
     return false;
@@ -388,12 +353,7 @@ function cursorByHalfPage(view: EditorView, forward: boolean) {
     }
 
     const next = view.moveVertically(
-      EditorSelection.cursor(
-        selection.head,
-        undefined,
-        undefined,
-        selection.goalColumn
-      ),
+      EditorSelection.cursor(selection.head, undefined, undefined, selection.goalColumn),
       forward,
       height
     );
@@ -420,12 +380,7 @@ function selectByHalfPage(view: EditorView, forward: boolean) {
     }
 
     const next = view.moveVertically(
-      EditorSelection.cursor(
-        selection.head,
-        undefined,
-        undefined,
-        selection.goalColumn
-      ),
+      EditorSelection.cursor(selection.head, undefined, undefined, selection.goalColumn),
       forward,
       height
     );
@@ -666,11 +621,7 @@ export function surround(view: EditorView, char: string) {
   view.dispatch(tr, { effects: MODE_EFF.NORMAL });
 }
 
-export function extendToDelimiters(
-  view: EditorView,
-  char: string,
-  inclusive: boolean
-) {
+export function extendToDelimiters(view: EditorView, char: string, inclusive: boolean) {
   const mode = view.state.field(modeField);
   const pair = PAIRS[char];
 
@@ -692,10 +643,7 @@ export function extendToDelimiters(
       return range;
     }
 
-    if (
-      open !== close &&
-      view.state.sliceDoc(next.value.from, next.value.to) === open
-    ) {
+    if (open !== close && view.state.sliceDoc(next.value.from, next.value.to) === open) {
       const cursor = query.getCursor(view.state, 0, range.head);
 
       let nextOpen: ReturnType<typeof cursor["next"]> | undefined;
@@ -736,8 +684,7 @@ export function extendToDelimiters(
       return range;
     }
 
-    let [start, end] =
-      dir > 0 ? [match.end, next.value] : [next.value, match.end];
+    let [start, end] = dir > 0 ? [match.end, next.value] : [next.value, match.end];
 
     if (!inclusive) {
       const startTo = nextClusterBreak(view.state.doc, start.to, true);
@@ -853,9 +800,7 @@ export function yank(view: EditorView, mode: NonInsertMode, register?: string) {
     effects: [
       yankEffect.of([
         register,
-        selection.ranges.map((range) =>
-          view.state.doc.slice(range.from, range.to)
-        ),
+        selection.ranges.map((range) => view.state.doc.slice(range.from, range.to)),
       ]),
       MODE_EFF.NORMAL,
     ],
@@ -1024,8 +969,7 @@ export function rotateSelection(view: EditorView, forward: boolean) {
     return true;
   }
 
-  const mainIndex =
-    (selection.mainIndex + (forward ? 1 : -1)) % selection.ranges.length;
+  const mainIndex = (selection.mainIndex + (forward ? 1 : -1)) % selection.ranges.length;
 
   view.dispatch({
     selection: EditorSelection.create(
@@ -1064,10 +1008,7 @@ export function rangeIsAtomic(range: SelectionRange, doc: Text) {
   }
 }
 
-export function cloneRange(
-  range: SelectionRange,
-  override: Partial<SelectionRange>
-) {
+export function cloneRange(range: SelectionRange, override: Partial<SelectionRange>) {
   return EditorSelection.range(
     override.anchor ?? range.anchor,
     override.head ?? range.head,
@@ -1103,10 +1044,7 @@ export function mapSel(
     return EditorSelection.single(mapped.anchor, mapped.head);
   }
 
-  return EditorSelection.create(
-    selection.ranges.map(mapper),
-    selection.mainIndex
-  );
+  return EditorSelection.create(selection.ranges.map(mapper), selection.mainIndex);
 }
 
 function escape(source: string) {

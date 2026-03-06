@@ -65,9 +65,7 @@ export class Picker extends HTMLElement {
 
   #onClick(e: MouseEvent) {
     if (e.target instanceof HTMLLIElement) {
-      const index = [...this.#visible]
-        .map((i) => this.#ul.children[i])
-        .indexOf(e.target);
+      const index = [...this.#visible].map((i) => this.#ul.children[i]).indexOf(e.target);
 
       const prev = this.#selected;
       this.#selected = index;
@@ -129,11 +127,7 @@ export class Picker extends HTMLElement {
       span.classList.add("match");
       span.textContent = label.slice(index, index + input.length);
 
-      li.replaceChildren(
-        label.slice(0, index),
-        span,
-        label.slice(index + input.length)
-      );
+      li.replaceChildren(label.slice(0, index), span, label.slice(index + input.length));
     }
   }
 
@@ -156,8 +150,7 @@ export class Picker extends HTMLElement {
       case "ArrowUp": {
         if (this.#visible.length > 0) {
           this.#selected =
-            (this.#selected - step + this.#visible.length) %
-            this.#visible.length;
+            (this.#selected - step + this.#visible.length) % this.#visible.length;
           this.#setSelected(prevSelected);
         }
         break;
@@ -203,10 +196,7 @@ export class Picker extends HTMLElement {
       }
     }
 
-    this.#selected = Math.min(
-      this.#selected,
-      Math.max(0, visibleOptions.length - 1)
-    );
+    this.#selected = Math.min(this.#selected, Math.max(0, visibleOptions.length - 1));
     this.#visible = visibleOptions;
 
     this.#setSelected(prevSelected);
@@ -224,9 +214,7 @@ export class Picker extends HTMLElement {
     }
 
     if (this.#visible.length > 0) {
-      this.#ul.children[this.#visible[this.#selected]].classList.add(
-        "selected"
-      );
+      this.#ul.children[this.#visible[this.#selected]].classList.add("selected");
     }
   }
 }
@@ -237,8 +225,6 @@ class SelectEvent extends Event {
   }
 }
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tagName: K
-): HTMLElementTagNameMap[K] {
+function el<K extends keyof HTMLElementTagNameMap>(tagName: K): HTMLElementTagNameMap[K] {
   return document.createElement(tagName);
 }

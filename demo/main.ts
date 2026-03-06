@@ -18,9 +18,7 @@ let codemirror: typeof import("./codemirror");
 
 let currentTheme =
   localStorage.getItem("cm-hx-theme") ??
-  (window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "one-dark"
-    : "default");
+  (window.matchMedia("(prefers-color-scheme: dark)").matches ? "one-dark" : "default");
 
 const debugEl = document.querySelector("hx-debug")!;
 let tabGroup: SlTabGroup;
@@ -39,9 +37,7 @@ function initShoelace() {
 
     if (changed) {
       state.active = panels.indexOf(
-        tabGroup.querySelector(
-          `sl-tab-panel[name="${(e as any).detail.name}"]`
-        )!
+        tabGroup.querySelector(`sl-tab-panel[name="${(e as any).detail.name}"]`)!
       );
     }
 
@@ -77,10 +73,7 @@ const debugPlugin = () =>
   });
 
 const state = {
-  editors: new Map<
-    string,
-    { view: EditorView; panel: SlTabPanel; tab: SlTab }
-  >(),
+  editors: new Map<string, { view: EditorView; panel: SlTabPanel; tab: SlTab }>(),
   tabs: [] as string[],
   set(file: string, view: EditorView, panel: SlTabPanel, tab: SlTab) {
     state.tabs.push(file);
@@ -120,16 +113,13 @@ const themes = [
   {
     name: "tokio-night",
     extension: () => () =>
-      import("@ddietr/codemirror-themes/tokyo-night").then(
-        (mod) => mod.tokyoNight
-      ),
+      import("@ddietr/codemirror-themes/tokyo-night").then((mod) => mod.tokyoNight),
     dark: true,
   },
 ];
 
 const darkTheme =
-  currentTheme != null &&
-  themes.find((theme) => theme.name === currentTheme)?.dark;
+  currentTheme != null && themes.find((theme) => theme.name === currentTheme)?.dark;
 
 {
   if (darkTheme) {
@@ -255,9 +245,7 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
           },
           ":buffer-close": {
             handler(buffers) {
-              const nonexistent = buffers?.filter(
-                (name) => !state.tabs.includes(name)
-              );
+              const nonexistent = buffers?.filter((name) => !state.tabs.includes(name));
 
               const nonexistentError = nonexistent?.length
                 ? `cannot close non-existent buffers: ${nonexistent.join(", ")}`
@@ -274,9 +262,7 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
               const toClose = buffers?.length
                 ? buffers.flatMap((name) => {
                     const index = state.tabs.indexOf(name);
-                    return index >= 0
-                      ? [[index, state.tabs[index]] as const]
-                      : [];
+                    return index >= 0 ? [[index, state.tabs[index]] as const] : [];
                   })
                 : [[state.active, state.tabs[state.active]] as const];
 
@@ -437,10 +423,7 @@ function setPersistedFile(file: string, contents: string) {
   localStorage.setItem(`cm-hx-doc/${file}`, contents);
 }
 
-function createPicker(
-  view: EditorView | undefined,
-  onSelect: (value: string) => void
-) {
+function createPicker(view: EditorView | undefined, onSelect: (value: string) => void) {
   const picker = document.createElement("hx-picker");
 
   document.body.append(picker);
@@ -511,9 +494,9 @@ function configFromInput() {
 
   for (const control of controls) {
     if (control instanceof HTMLSelectElement) {
-      config[control.name] = (
-        [...control.children] as HTMLOptionElement[]
-      ).find((opt) => opt.selected)!.value;
+      config[control.name] = ([...control.children] as HTMLOptionElement[]).find(
+        (opt) => opt.selected
+      )!.value;
     }
   }
 
@@ -547,9 +530,7 @@ async function chooseSyntax(file: string) {
       return import("@codemirror/lang-html").then(({ html }) => [html()]);
     }
     case "md": {
-      return import("@codemirror/lang-markdown").then(({ markdown }) => [
-        markdown(),
-      ]);
+      return import("@codemirror/lang-markdown").then(({ markdown }) => [markdown()]);
     }
     case "css": {
       return import("@codemirror/lang-css").then(({ css }) => [css()]);

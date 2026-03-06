@@ -57,5 +57,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://gitlab.com/_rvidal/codemirror-helix.git"
+  },
+  "prettier": {
+    "printWidth": 90
   }
 }

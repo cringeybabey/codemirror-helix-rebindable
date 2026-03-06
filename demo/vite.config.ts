@@ -40,9 +40,7 @@ function importFolderAsJson(): PluginOption {
 
         const resolvedPath = resolve(dirname(importer!), folderPath);
 
-        return `${resolvedVirtualModuleId}?${resolvedPath}${
-          cmd ? `&${cmd}` : ""
-        }`;
+        return `${resolvedVirtualModuleId}?${resolvedPath}${cmd ? `&${cmd}` : ""}`;
       }
     },
     async load(id) {

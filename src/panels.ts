@@ -1,16 +1,7 @@
 import { EditorView, Panel } from "@codemirror/view";
-import {
-  EditorSelection,
-  type FacetReader,
-  type Text,
-} from "@codemirror/state";
+import { EditorSelection, type FacetReader, type Text } from "@codemirror/state";
 import type { TypableCommand } from "./lib";
-import {
-  modeStatus,
-  readRegister,
-  registersHistoryField,
-  yankEffect,
-} from "./state";
+import { modeStatus, readRegister, registersHistoryField, yankEffect } from "./state";
 import { ModeState, SearchMode } from "./entities";
 
 const MOUNT_EVENT = "cm-hx-input-mounted";
@@ -152,10 +143,7 @@ export class CommandPanel implements Panel {
   showSearchInput(mode = SearchMode.Normal) {
     const input = this.searchInput(mode);
 
-    this.showInput(
-      input,
-      mode === SearchMode.Global ? "global-search:" : "search:"
-    );
+    this.showInput(input, mode === SearchMode.Global ? "global-search:" : "search:");
   }
 
   showCommandInput() {
@@ -328,8 +316,7 @@ export class CommandPanel implements Panel {
         } else if (readingRegister && e.key.length === 1) {
           readingRegister = false;
 
-          input.value +=
-            readRegister(view.state, e.key)?.at(0)?.toString() ?? "";
+          input.value += readRegister(view.state, e.key)?.at(0)?.toString() ?? "";
         } else if (!readingRegister) {
           return;
         }
@@ -353,8 +340,7 @@ export class CommandPanel implements Panel {
 
           const command = commands.find(
             (command) =>
-              command.name === cmd ||
-              command.aliases?.some((alias) => alias === cmd)
+              command.name === cmd || command.aliases?.some((alias) => alias === cmd)
           );
 
           const result = command
@@ -460,9 +446,7 @@ export class CommandPanel implements Panel {
           return undefined;
         }
 
-        return (
-          input.value.slice(0, input.value.length - last.length) + `${value}`
-        );
+        return input.value.slice(0, input.value.length - last.length) + `${value}`;
       },
     });
 
@@ -544,9 +528,7 @@ export class CommandPanel implements Panel {
     current?.classList.remove("cm-hx-selected-option");
 
     if (selected != null) {
-      this.autocomplete.children[selected].classList.add(
-        "cm-hx-selected-option"
-      );
+      this.autocomplete.children[selected].classList.add("cm-hx-selected-option");
     }
 
     if (this.popupRequest == null) {
@@ -592,8 +574,7 @@ export class CommandPanel implements Panel {
 
     for (let i = 0; i < width; i++) {
       for (let j = i; j < this.autocomplete.children.length; j += width) {
-        (this.autocomplete.children.item(order) as HTMLElement).style.order =
-          String(j);
+        (this.autocomplete.children.item(order) as HTMLElement).style.order = String(j);
         order++;
       }
     }

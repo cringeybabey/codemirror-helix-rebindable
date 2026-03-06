@@ -9,9 +9,7 @@ import { Key } from "webdriverio";
 type Expectation =
   | Text
   | {
-      selection:
-        | [anchor: number, head: number]
-        | Array<[anchor: number, head: number]>;
+      selection: [anchor: number, head: number] | Array<[anchor: number, head: number]>;
       text?: Text;
     };
 
@@ -30,9 +28,7 @@ type Source = Text | { lang: string; source: Text };
 //
 // Optionally, the array can have one more element, a boolean as the first field
 // to single out focused tests (a la `it.only()`).
-type Case =
-  | [Source, string[], Expectation]
-  | [boolean, Source, string[], Expectation];
+type Case = [Source, string[], Expectation] | [boolean, Source, string[], Expectation];
 
 const cases: Record<string, Case> = {
   "moves to line end": [["foo", "bar"], ["g", "l"], { selection: [3, 2] }],
@@ -51,23 +47,11 @@ const cases: Record<string, Case> = {
     ["g", "l", "l", "x"],
     { selection: [0, 4] },
   ],
-  "surrounds moves selection": [
-    "foo",
-    ["x", "m", "s", "<"],
-    { selection: [0, 5] },
-  ],
-  "surrounds respects selection dir": [
-    "foo",
-    ["x", "Alt-;", "m", "s", "<"],
-    "<foo>",
-  ],
+  "surrounds moves selection": ["foo", ["x", "m", "s", "<"], { selection: [0, 5] }],
+  "surrounds respects selection dir": ["foo", ["x", "Alt-;", "m", "s", "<"], "<foo>"],
   "cancels surrounds": ["foo", ["x", "m", "s", "Escape", "a", "i"], "fooi"],
   "find characters": ["hello world", ["f", "w"], { selection: [0, 7] }],
-  "find characters, repeat": [
-    "hello world",
-    ["f", "o", "f", "o"],
-    { selection: [4, 8] },
-  ],
+  "find characters, repeat": ["hello world", ["f", "o", "f", "o"], { selection: [4, 8] }],
   "find characters, turn around": [
     "hello world",
     ["f", "w", "F", "e"],
@@ -79,9 +63,7 @@ const cases: Record<string, Case> = {
     { selection: [0, 11] },
   ],
   "search cancellation": [
-    Array.from({ length: 200 }, (_, count) =>
-      String(count + 1).padStart(3, "0")
-    ),
+    Array.from({ length: 200 }, (_, count) => String(count + 1).padStart(3, "0")),
     ["/", "0", "5", "0", "Enter", "/", "1", "3", "0", "Escape"],
     { selection: [196, 199] },
   ],
@@ -316,9 +298,7 @@ async function initEditor(source: Source) {
   await expect($(".ready")).toBePresent();
 
   return browser.execute(
-    `return initEditor(${JSON.stringify(textToString(text))}, ${JSON.stringify(
-      lang
-    )})`
+    `return initEditor(${JSON.stringify(textToString(text))}, ${JSON.stringify(lang)})`
   );
 }
 

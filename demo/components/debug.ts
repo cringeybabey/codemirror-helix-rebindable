@@ -42,17 +42,13 @@ export class Debug extends HTMLElement {
       main.anchor <= main.head ? "➡️" : "⬅️"
     } ${main.to}${
       selection.ranges.length > 1
-        ? ` at #${selection.mainIndex} (plus ${
-            selection.ranges.length - 1
-          } more)`
+        ? ` at #${selection.mainIndex} (plus ${selection.ranges.length - 1} more)`
         : ""
     }`;
   }
 
   set history(history: any) {
-    this.#history.textContent = `history: ${
-      history.checkpoints.length
-    } cursor: ${
+    this.#history.textContent = `history: ${history.checkpoints.length} cursor: ${
       history.cursor
     } head: ${!!history.head} pending: ${!!history.pending}`;
   }

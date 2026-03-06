@@ -3,7 +3,7 @@
 <a href="https://www.npmjs.com/package/codemirror-helix" target="_blank"><img src="https://flat.badgen.net/npm/v/codemirror-helix" /></a>
 <a href="https://gitlab.com/_rvidal/codemirror-helix" target="_blank"><img src="https://flat.badgen.net/badge/icon/gitlab?icon=gitlab&label" /></a>
 
-This is a fork of [codemirror-helix](https://gitlab.com/_rvidal/codemirror-helix)
+This is a fork of [codemirror-helix](https://gitlab.com/_rvidal/codemirror-helix) by Roberto Vidal on GitLab
 
 A [Codemirror](https://codemirror.net/) plugin for [Helix](https://helix-editor.com/) keybindings and general UX.
 

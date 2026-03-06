@@ -1,13 +1,13 @@
 import type { EditorView } from "@codemirror/view";
-import type SlTabPanel from "@shoelace-style/shoelace/dist/components/tab-panel/tab-panel";
-import type SlTabGroup from "@shoelace-style/shoelace/dist/components/tab-group/tab-group.component";
+import type { SlTabPanel } from "@shoelace-style/shoelace";
+import type { SlTabGroup } from "@shoelace-style/shoelace";
 
 import { Picker } from "./components/picker";
 import { Debug } from "./components/debug";
 
 // @ts-ignore
 import fileNames from "folder:..?names";
-import SlTab from "@shoelace-style/shoelace/dist/components/tab/tab.component";
+import { SlTab } from "@shoelace-style/shoelace";
 
 const filePickerOptions = fileNames.map((value: string) => ({ value }));
 
@@ -150,7 +150,7 @@ const darkTheme =
   ]);
 
   if (import.meta.env.DEV) {
-    main("src/lib.ts");
+    await main("src/lib.ts");
   } else {
     const picker = createPicker(undefined, async (file) => {
       await main(file);
@@ -230,7 +230,7 @@ async function createView(file: string, doc: string, parent: HTMLElement) {
                 return;
               }
 
-              createViewPanel(value);
+              createViewPanel(value).catch((error) => console.error(error));
             });
 
             picker.initOptions(filePickerOptions);

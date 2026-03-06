@@ -192,7 +192,7 @@ export class CommandPanel implements Panel {
     onClose: (commit: boolean, value: string) => void;
     onKeyDown?: (event: KeyboardEvent) => void;
     getPopup: (value: string) => { help?: string; options: string[] };
-    getHistory(): Array<string | Text> | undefined;
+    getHistory: () => Array<string | Text> | undefined;
     placeholder?: string;
     accept?: (value: string) => string | undefined;
   }) {

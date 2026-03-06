@@ -49,6 +49,7 @@ import {
 } from "./entities";
 
 import {
+  type History,
   expandSyntaxHistory,
   historyEffect,
   historyField,
@@ -461,7 +462,9 @@ const helixCommandBindings: {
 
         const currentLine = state.doc.lineAt(main.head);
 
-        if (currentLine.number >= state.doc.lines) return false;
+        if (currentLine.number >= state.doc.lines) {
+          return false;
+        }
 
         const col = countColumn(
           currentLine.text,
@@ -473,9 +476,7 @@ const helixCommandBindings: {
 
         const anchorCol = countColumn(
           currentLine.text,
-
           state.tabSize,
-
           main.anchor - currentLine.from
         );
 
@@ -488,19 +489,20 @@ const helixCommandBindings: {
 
           const newHeadOff = findColumn(line.text, col, state.tabSize, true);
 
-          if (newHeadOff < 0) continue;
+          if (newHeadOff < 0) {
+            continue;
+          }
 
           const newAnchorOff = findColumn(
             line.text,
-
             anchorCol,
-
             state.tabSize,
-
             true
           );
 
-          if (newAnchorOff < 0) continue;
+          if (newAnchorOff < 0) {
+            continue;
+          }
 
           const newHead = line.from + newHeadOff;
 
@@ -513,7 +515,6 @@ const helixCommandBindings: {
 
           view.dispatch({
             selection: state.selection.addRange(range, true),
-
             userEvent: "select",
           });
 
@@ -1365,9 +1366,11 @@ const helixCommandBindings: {
       command(view) {
         view.dispatch({ effects: MODE_EFF.NORMAL });
 
-        readClipboard(view.state).then((yanked) =>
-          paste(view, yanked, false, 1, { reset: false })
-        );
+        readClipboard(view.state)
+          .then((yanked) => paste(view, yanked, false, 1, { reset: false }))
+          .catch((error) => {
+            /* FIXME  */ console.error(error);
+          });
       },
     },
     ["P"]: {
@@ -1375,9 +1378,11 @@ const helixCommandBindings: {
       command(view) {
         view.dispatch({ effects: MODE_EFF.NORMAL });
 
-        readClipboard(view.state).then((yanked) =>
-          paste(view, yanked, true, 1, { reset: false })
-        );
+        readClipboard(view.state)
+          .then((yanked) => paste(view, yanked, true, 1, { reset: false }))
+          .catch((error) => {
+            /* FIXME  */ console.error(error);
+          });
       },
     },
     // FIXME: align with the non-clipboard one
@@ -1386,10 +1391,14 @@ const helixCommandBindings: {
       command(view) {
         view.dispatch({ effects: MODE_EFF.NORMAL });
 
-        readClipboard(view.state).then((yanked) => {
-          const tr = view.state.replaceSelection(yanked[0]);
-          view.dispatch(tr);
-        });
+        readClipboard(view.state)
+          .then((yanked) => {
+            const tr = view.state.replaceSelection(yanked[0]);
+            view.dispatch(tr);
+          })
+          .catch((error) => {
+            /* FIXME  */ console.error(error);
+          });
       },
     },
     ["f"](view, mode) {
@@ -1810,7 +1819,7 @@ type ExternalCommandsDefinition = Partial<
 > & {
   [":buffer-close"]?: {
     handler(buffers?: string[]): void | CommandPanelMessage;
-    autocomplete?(args: string[]): string[];
+    autocomplete?: (args: string[]) => string[];
   };
   global_search?(input: string): void | CommandPanelMessage;
 };
@@ -1885,16 +1894,30 @@ export const pathRegister = Facet.define<
 });
 
 /**
+ * A snapshot created by `snapshot()`.
+ */
+interface Snapshot {
+  __brand: "snapshot_return_type";
+}
+
+interface PrivateSnapshot {
+  registers: Record<string, Array<string | Text>>;
+  registersHistory: Record<string, Array<string | Text>>;
+  theme?: string;
+  history?: History;
+}
+
+/**
  * Creates a snapshot of the extension state suitable to initialize
  * the extension later (see `init` and `globalInit`). Snapshots are JSON-serializable.
  *
  * If `global` is true, the snapshot only contains global state. This way
  * it is slimmer, but it is only valid for `globalInit`.
  */
-export function snapshot(state: EditorState, global = false): Object {
+export function snapshot(state: EditorState, global = false): Snapshot {
   const theme = state.field(themeField, false);
 
-  return {
+  const snapshot: PrivateSnapshot = {
     registers: state.field(registersField),
     registersHistory: state.field(registersHistoryField),
     theme: theme?.current,
@@ -1904,6 +1927,8 @@ export function snapshot(state: EditorState, global = false): Object {
           history: state.field(historyField),
         }),
   };
+
+  return snapshot as any as Snapshot;
 }
 
 /**
@@ -1998,13 +2023,13 @@ export interface Options {
    * If provided, sets the extension initial state from a previous state, or a snapshot
    * created by `snapshot()`.
    */
-  init?: EditorState | Object;
+  init?: EditorState | Snapshot;
 
   /**
    * Like `init`, but it will only restore global state that should be shared between different "tabs".
    * For instance, registers are global state, while undo/redo history is not.
    */
-  globalInit?: EditorState | Object;
+  globalInit?: EditorState | Snapshot;
 }
 
 /**
@@ -2065,24 +2090,35 @@ function changeTheme(view: EditorView, theme: string, notify = true) {
 
   const promise =
     typeof themeObj.extension === "function"
-      ? themeObj.extension()
+      ? themeObj.extension().catch((error) => {
+          console.error(error);
+          return null;
+        })
       : Promise.resolve(themeObj.extension);
 
-  promise.then((extension) => {
-    view.dispatch({
-      effects: [
-        themeCompartment.reconfigure([
-          extension,
-          themeObj.dark ? panelTheme.dark : panelTheme.light,
-        ]),
-        themeEffect.of(theme),
-      ],
-    });
+  promise
+    .then((extension) => {
+      if (!extension) {
+        return;
+      }
 
-    if (notify) {
-      view.state.facet(themeFacet).forEach((cb) => cb(themeObj));
-    }
-  });
+      view.dispatch({
+        effects: [
+          themeCompartment.reconfigure([
+            extension,
+            themeObj.dark ? panelTheme.dark : panelTheme.light,
+          ]),
+          themeEffect.of(theme),
+        ],
+      });
+
+      if (notify) {
+        view.state.facet(themeFacet).forEach((cb) => cb(themeObj));
+      }
+    })
+    .catch((error) => {
+      console.error(error);
+    });
 }
 
 /**
@@ -2100,28 +2136,28 @@ export function helix(options: Options = {}): Extension {
     globalState instanceof EditorState
       ? globalState.field(registersField)
       : globalState
-      ? (globalState as any).registers
+      ? (globalState as any as PrivateSnapshot).registers
       : undefined;
 
   const initialHistory =
     options.init instanceof EditorState
       ? options.init.field(historyField)
       : options.init
-      ? (options.init as any).history
+      ? (options.init as any as PrivateSnapshot).history
       : undefined;
 
   const initialRegistersHistory =
     globalState instanceof EditorState
       ? globalState.field(registersHistoryField)
       : globalState
-      ? (globalState as any).registersHistory
+      ? (globalState as any as PrivateSnapshot).registersHistory
       : undefined;
 
   const initialThemeName =
     globalState instanceof EditorState
       ? globalState.field(themeField, false)?.current
       : globalState
-      ? (globalState as any).theme
+      ? (globalState as any as PrivateSnapshot).theme
       : options.config?.theme;
 
   if (initialThemeName != null && !options.themes?.length) {
@@ -2301,9 +2337,13 @@ export function helix(options: Options = {}): Extension {
         handler(view) {
           const selection = view.state.selection.main;
 
-          navigator.clipboard.writeText(
-            view.state.doc.slice(selection.from, selection.to).toString()
-          );
+          navigator.clipboard
+            .writeText(
+              view.state.doc.slice(selection.from, selection.to).toString()
+            )
+            .catch((error) => {
+              /* FIXME  */ console.error(error);
+            });
 
           return { message: "Yanked main selection to + register" };
         },

@@ -174,7 +174,7 @@ export const config: Options.Testrunner = {
    * @param {object} config wdio configuration object
    * @param {Array.<Object>} capabilities list of capabilities details
    */
-  onPrepare(config, capabilities) {
+  onPrepare() {
     return runServer();
   },
   /**

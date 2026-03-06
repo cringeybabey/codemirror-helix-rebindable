@@ -188,10 +188,14 @@ export const registersField = StateField.define<
             break;
           }
           case "+": {
-            navigator.clipboard.writeText(
-              // FIXME: proper line ending?
-              value.map((yank) => yank.toString()).join("\n")
-            );
+            navigator.clipboard
+              .writeText(
+                // FIXME: proper line ending?
+                value.map((yank) => yank.toString()).join("\n")
+              )
+              .catch((error) => {
+                /* FIXME */ console.error(error);
+              });
 
             break;
           }
@@ -278,12 +282,14 @@ type HistoryEffect =
 
 export const historyEffect = StateEffect.define<HistoryEffect>();
 
-export const historyField = StateField.define<{
+export type History = {
   checkpoints: EditorState[];
   cursor: number;
   pending: EditorState | null;
   head: EditorState | null;
-}>({
+};
+
+export const historyField = StateField.define<History>({
   create() {
     return { checkpoints: [], cursor: -1, pending: null, head: null };
   },

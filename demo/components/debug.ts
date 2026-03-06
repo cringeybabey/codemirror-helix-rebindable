@@ -31,7 +31,7 @@ export class Debug extends HTMLElement {
 
   set registers(registers: any) {
     this.#register.textContent = Object.entries(registers)
-      .map(([reg, value]) => `<${reg}> => ${value}`)
+      .map(([reg, value]) => `<${reg}> => ${value as any}`)
       .join("\n");
   }
 
